@@ -1,0 +1,95 @@
+"""読み上げ用テキスト整形のテスト."""
+
+from __future__ import annotations
+
+import unittest
+
+from cc_voicepeak.config import DEFAULTS
+from cc_voicepeak.normalize import normalize
+
+NL = chr(10)
+
+
+def run(text: str, **options) -> str:
+    opts = dict(DEFAULTS["normalize"])
+    opts.update(options)
+    return normalize(text, opts)
+
+
+class NormalizeTest(unittest.TestCase):
+    def test_headings_become_sentences(self):
+        self.assertEqual(run("## 実装完了"), "実装完了。")
+
+    def test_code_fence_becomes_placeholder(self):
+        text = NL.join(["説明します。", "```python", "print(1)", "```", "以上です。"])
+        result = run(text)
+        self.assertNotIn("print", result)
+        self.assertIn("コードブロック", result)
+
+    def test_code_fence_can_be_dropped(self):
+        text = NL.join(["説明します。", "```", "print(1)", "```"])
+        self.assertEqual(run(text, code_blocks="drop"), "説明します。")
+
+    def test_inline_code_is_read_without_backticks(self):
+        self.assertEqual(run("`split_text` を直しました。"), "split_text を直しました。")
+
+    def test_links_read_label_only(self):
+        self.assertEqual(run("[README](https://example.com/a) を見て。"), "README を見て。")
+
+    def test_bare_url_is_replaced(self):
+        self.assertEqual(run("詳細は https://example.com/x です。"), "詳細はリンクです。")
+
+    def test_urls_can_be_kept(self):
+        self.assertIn("https://", run("https://example.com", strip_urls=False))
+
+    def test_paths_are_shortened(self):
+        self.assertEqual(run("src/cc/splitter.py を修正。"), "splitter.py を修正。")
+
+    def test_path_with_line_number(self):
+        self.assertIn("120行目", run("/home/u/a/b.py:120 が原因です。"))
+
+    def test_emoji_is_stripped(self):
+        self.assertEqual(run("完了しました\U0001F389"), "完了しました")
+
+    def test_checkbox_is_verbalized(self):
+        text = NL.join(["- [x] 分割", "- [ ] テスト"])
+        result = run(text)
+        self.assertIn("完了、分割", result)
+        self.assertIn("未完了、テスト", result)
+
+    def test_table_dropped_by_default(self):
+        text = NL.join(["結果です。", "| 項目 | 値 |", "|---|---|", "| 件数 | 3 |"])
+        self.assertEqual(run(text), "結果です。")
+
+    def test_table_can_be_read(self):
+        text = NL.join(["| 項目 | 値 |", "|---|---|", "| 件数 | 3 |"])
+        result = run(text, tables="read")
+        self.assertIn("件数、3。", result)
+
+    def test_horizontal_rule_removed(self):
+        self.assertEqual(run(NL.join(["前。", "---", "後。"])), "前。" + NL + "後。")
+
+    def test_bold_markers_removed(self):
+        self.assertEqual(run("**重要**な点です。"), "重要な点です。")
+
+    def test_replacements_applied(self):
+        result = run("PR を作成しました。", replacements=[["(?i)\\bPR\\b", "プルリク"]])
+        self.assertEqual(result, "プルリクを作成しました。")
+
+    def test_invalid_replacement_is_ignored(self):
+        self.assertEqual(run("そのまま。", replacements=[["([", "x"], ["bad"]]), "そのまま。")
+
+    def test_max_total_chars_truncates_at_sentence(self):
+        text = "一つ目の文です。二つ目の文です。三つ目の文です。"
+        result = run(text, max_total_chars=20, truncated_suffix="以下省略。")
+        self.assertTrue(result.endswith("以下省略。"))
+        self.assertLessEqual(len(result), 20 + len("以下省略。"))
+
+    def test_tool_markers_removed(self):
+        self.assertEqual(run("⏺ 完了しました。"), "完了しました。")
+
+    def test_html_is_stripped(self):
+        self.assertEqual(run("<b>強調</b>です。"), "強調です。")
+
+    def test_blank_lines_collapsed(self):
+        self.assertEqual(run(NL.join(["前。", "", "", "後。"])), "前。" + NL + "後。")

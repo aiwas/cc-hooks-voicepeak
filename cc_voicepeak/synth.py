@@ -1,0 +1,313 @@
+"""voicepeak.exe を叩いて 1 ブロックずつ wav を作る.
+
+voicepeak は 1 回の起動で 140 文字までしか受け付けず、しかも同時起動もできないので
+「ブロックごとに EXE を起動 → 直列に合成」という形にしかならない。起動コストが
+大きいので、同じ文面のキャッシュ再利用を入れてある。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+import shutil
+import subprocess
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Optional, Sequence
+
+from .bridge import Bridge
+from .errors import SynthError
+from .locking import ExeLock
+from .logging_util import get_logger
+
+log = get_logger("synth")
+
+# 改行以外の制御文字 (voicepeak に渡すと落ちる可能性がある)
+_CONTROL_CHARS = "".join(
+    chr(code)
+    for code in list(range(0x00, 0x0A)) + [0x0B, 0x0C] + list(range(0x0E, 0x20)) + [0x7F]
+)
+_CONTROL = re.compile("[" + re.escape(_CONTROL_CHARS) + "]")
+_SENTENCE_TAIL = "。．！？!?、，,;；:："
+NEWLINE = chr(10)
+
+
+@dataclass
+class VoiceParams:
+    """voicepeak に渡す声のパラメータ."""
+
+    narrator: Optional[str] = None
+    emotion: Optional[str] = None
+    speed: Optional[int] = None
+    pitch: Optional[int] = None
+
+    def args(self) -> List[str]:
+        args: List[str] = []
+        if self.narrator:
+            args += ["-n", str(self.narrator)]
+        if self.emotion:
+            args += ["-e", str(self.emotion)]
+        if self.speed is not None:
+            args += ["--speed", str(int(self.speed))]
+        if self.pitch is not None:
+            args += ["--pitch", str(int(self.pitch))]
+        return args
+
+    def key(self) -> str:
+        return "|".join(
+            str(value) for value in (self.narrator, self.emotion, self.speed, self.pitch)
+        )
+
+
+@dataclass
+class SynthResult:
+    index: int
+    text: str
+    path: Path
+    cached: bool = False
+    elapsed: float = 0.0
+    error: Optional[str] = None
+    success: bool = False
+    command: Sequence[str] = field(default_factory=tuple)
+
+    @property
+    def ok(self) -> bool:
+        # 一時ファイルは読み上げ後に消えるため、成否は合成時点で確定させる
+        return self.error is None and self.success
+
+
+def prepare_block(text: str) -> str:
+    """1 ブロックを EXE に渡せる 1 行のテキストに整える.
+
+    改行はそのまま渡すと環境によって扱いが変わるため、読点に寄せて 1 行にする。
+    """
+    text = _CONTROL.sub(" ", text)
+    out: List[str] = []
+    for ch in text:
+        if ch == NEWLINE:
+            if out and out[-1] in _SENTENCE_TAIL:
+                continue
+            if out:
+                out.append("、")
+            continue
+        out.append(ch)
+    result = "".join(out)
+    result = re.sub(r"[ \t　]{2,}", " ", result).strip()
+    return result.strip("、")
+
+
+class Synthesizer:
+    """ブロック列 -> wav 列."""
+
+    def __init__(
+        self,
+        exe: Path,
+        bridge: Bridge,
+        params: Optional[VoiceParams] = None,
+        char_limit: int = 140,
+        input_mode: str = "say",
+        timeout: int = 120,
+        retries: int = 1,
+        use_cache: bool = True,
+        cache_max_files: int = 400,
+        work_dir: Optional[Path] = None,
+    ):
+        self.exe = Path(exe)
+        self.bridge = bridge
+        self.params = params or VoiceParams()
+        self.char_limit = char_limit
+        self.input_mode = input_mode
+        self.timeout = timeout
+        self.retries = max(0, retries)
+        self.use_cache = use_cache
+        self.cache_max_files = cache_max_files
+
+        root = bridge.temp_root()
+        self.work_dir = Path(work_dir) if work_dir else root / "run" / str(os.getpid())
+        self.cache_dir = root / "cache"
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+        if self.use_cache:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # -- キャッシュ --------------------------------------------------------
+    def _cache_path(self, text: str) -> Path:
+        digest = hashlib.sha1(f"{self.params.key()} {text}".encode("utf-8")).hexdigest()
+        return self.cache_dir / f"{digest}.wav"
+
+    def prune_cache(self) -> None:
+        if not self.use_cache or self.cache_max_files <= 0:
+            return
+        try:
+            files = sorted(
+                self.cache_dir.glob("*.wav"), key=lambda p: p.stat().st_mtime, reverse=True
+            )
+        except OSError:
+            return
+        for stale in files[self.cache_max_files :]:
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+
+    # -- 合成 --------------------------------------------------------------
+    def synth_block(self, index: int, text: str, out_path: Optional[Path] = None) -> SynthResult:
+        prepared = prepare_block(text)
+        if not prepared:
+            return SynthResult(index, text, Path(), error="空のブロック")
+
+        if len(prepared) > self.char_limit:
+            return SynthResult(
+                index,
+                prepared,
+                Path(),
+                error=f"{len(prepared)} 文字は上限 {self.char_limit} を超えています",
+            )
+
+        target = Path(out_path) if out_path else self.work_dir / f"{index:04d}.wav"
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        if self.use_cache:
+            cached = self._cache_path(prepared)
+            if cached.exists() and cached.stat().st_size > 44:
+                try:
+                    shutil.copyfile(cached, target)
+                    log.debug("キャッシュ命中 #%d", index)
+                    return SynthResult(index, prepared, target, cached=True, success=True)
+                except OSError:
+                    pass
+
+        modes = [self.input_mode]
+        fallback = "text_file" if self.input_mode == "say" else "say"
+        modes += [fallback] * self.retries
+        if prepared.startswith("-"):
+            # -s の値がオプションと誤認されるのを避ける
+            modes = ["text_file"] + [mode for mode in modes if mode != "text_file"]
+
+        last_error = "不明なエラー"
+        command: Sequence[str] = ()
+        started = time.monotonic()
+        for attempt, mode in enumerate(modes):
+            try:
+                command = self._run(prepared, target, mode)
+            except SynthError as exc:
+                last_error = str(exc)
+                log.warning(
+                    "合成に失敗 #%d (mode=%s, 試行 %d): %s", index, mode, attempt + 1, exc
+                )
+                continue
+            elapsed = time.monotonic() - started
+            if self.use_cache:
+                try:
+                    shutil.copyfile(target, self._cache_path(prepared))
+                except OSError:
+                    pass
+            return SynthResult(
+                index, prepared, target, elapsed=elapsed, success=True, command=command
+            )
+
+        return SynthResult(index, prepared, target, error=last_error, command=command)
+
+    def _run(self, text: str, target: Path, mode: str) -> Sequence[str]:
+        command: List[str] = [str(self.exe)]
+        text_file: Optional[Path] = None
+
+        if mode == "text_file":
+            text_file = target.with_suffix(".txt")
+            # BOM なし UTF-8 / 末尾改行なしで書く
+            text_file.write_bytes(text.encode("utf-8"))
+            command += ["-t", self.bridge.to_win(text_file)]
+        else:
+            command += ["-s", text]
+
+        command += ["-o", self.bridge.to_win(target)]
+        command += self.params.args()
+
+        if target.exists():
+            try:
+                target.unlink()
+            except OSError:
+                pass
+
+        log.debug("実行: %s", command)
+        try:
+            with ExeLock():
+                proc = subprocess.run(
+                    command,
+                    capture_output=True,
+                    timeout=self.timeout,
+                    cwd=self.bridge.exec_cwd(),
+                    env=self.bridge.popen_env(),
+                    check=False,
+                )
+        except subprocess.TimeoutExpired as exc:
+            raise SynthError(f"voicepeak がタイムアウトしました ({self.timeout}s)") from exc
+        except FileNotFoundError as exc:
+            raise SynthError(
+                f"voicepeak を実行できません: {self.exe} / "
+                "WSL interop (/proc/sys/fs/binfmt_misc/WSLInterop) が有効か確認してください。"
+            ) from exc
+        except OSError as exc:
+            raise SynthError(f"voicepeak の起動に失敗しました: {exc}") from exc
+        finally:
+            if text_file is not None:
+                try:
+                    text_file.unlink()
+                except OSError:
+                    pass
+
+        stdout = _decode(proc.stdout)
+        stderr = _decode(proc.stderr)
+        if proc.returncode != 0:
+            raise SynthError(
+                f"voicepeak が異常終了しました (code={proc.returncode}): "
+                f"{(stderr or stdout).strip()[:300]}"
+            )
+        if not target.exists() or target.stat().st_size <= 44:
+            detail = (stderr or stdout).strip()[:300]
+            raise SynthError(
+                "wav が出力されませんでした: "
+                + (detail or "出力先の書き込み権限を確認してください")
+            )
+        return tuple(command)
+
+    # -- 情報取得 ----------------------------------------------------------
+    def _simple_run(self, *args: str) -> str:
+        try:
+            with ExeLock():
+                proc = subprocess.run(
+                    [str(self.exe), *args],
+                    capture_output=True,
+                    timeout=60,
+                    cwd=self.bridge.exec_cwd(),
+                    check=False,
+                )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise SynthError(f"voicepeak を実行できません: {exc}") from exc
+        return _decode(proc.stdout) or _decode(proc.stderr)
+
+    def check(self) -> str:
+        return self._simple_run("--help")
+
+    def list_narrators(self) -> List[str]:
+        output = self._simple_run("--list-narrator")
+        return [line.strip() for line in output.splitlines() if line.strip()]
+
+    def list_emotions(self, narrator: str) -> List[str]:
+        output = self._simple_run("--list-emotion", narrator)
+        return [line.strip() for line in output.splitlines() if line.strip()]
+
+    def cleanup(self) -> None:
+        shutil.rmtree(self.work_dir, ignore_errors=True)
+
+
+def _decode(raw: bytes) -> str:
+    if not raw:
+        return ""
+    for encoding in ("utf-8", "cp932", "utf-16-le"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")

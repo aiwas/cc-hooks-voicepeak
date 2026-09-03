@@ -1,0 +1,177 @@
+"""WSL <-> Windows のパス変換とプレイヤスクリプトのテスト.
+
+WSL でなくても検証できる範囲 (文字列変換・スクリプト生成) を対象にする。
+"""
+
+from __future__ import annotations
+
+import base64
+import os
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from cc_voicepeak.bridge import (
+    LocalBridge,
+    WslBridge,
+    detect_bridge,
+    resolve_exe,
+)
+from cc_voicepeak.errors import BridgeError
+from cc_voicepeak.player import _PS_SCRIPT, _encoded_command, select_player
+
+
+class WslPathTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.bridge = WslBridge()
+
+    def test_mnt_path_to_windows_without_wslpath(self):
+        with mock.patch.object(WslBridge, "_wslpath", side_effect=AssertionError):
+            self.assertEqual(
+                self.bridge.to_win("/mnt/c/Users/foo/a.wav"), "C:\\Users\\foo\\a.wav"
+            )
+
+    def test_drive_root(self):
+        self.assertEqual(self.bridge.to_win("/mnt/d"), "D:\\")
+
+    def test_windows_path_passes_through(self):
+        self.assertEqual(self.bridge.to_win("C:\\tmp\\a.wav"), "C:\\tmp\\a.wav")
+        self.assertEqual(self.bridge.to_win("C:/tmp/a.wav"), "C:\\tmp\\a.wav")
+
+    def test_unc_path_passes_through(self):
+        unc = "\\\\wsl.localhost\\Ubuntu\\tmp\\a.wav"
+        self.assertEqual(self.bridge.to_win(unc), unc)
+
+    def test_to_linux_from_windows_path(self):
+        self.assertEqual(
+            self.bridge.to_linux("C:\\Users\\foo\\a.wav"), Path("/mnt/c/Users/foo/a.wav")
+        )
+
+    def test_non_mnt_path_uses_wslpath(self):
+        with mock.patch.object(
+            WslBridge, "_wslpath", return_value="\\\\wsl.localhost\\Ubuntu\\home\\u\\a.wav"
+        ) as called:
+            result = self.bridge.to_win("/home/u/a.wav")
+        self.assertTrue(result.startswith("\\\\wsl.localhost"))
+        called.assert_called_once()
+
+    def test_conversion_is_cached(self):
+        with mock.patch.object(WslBridge, "_wslpath", return_value="X:\\a") as called:
+            self.bridge.to_win("/home/u/a.wav")
+            self.bridge.to_win("/home/u/a.wav")
+        self.assertEqual(called.call_count, 1)
+
+    def test_wslpath_failure_is_reported(self):
+        with mock.patch("subprocess.run", side_effect=OSError("boom")):
+            with self.assertRaises(BridgeError):
+                self.bridge.to_win("/home/u/a.wav")
+
+    def test_exec_cwd_avoids_unc(self):
+        """Windows EXE の cwd は必ず /mnt 配下 (UNC 警告を避ける)."""
+        with mock.patch.object(WslBridge, "temp_root", return_value=Path("/home/u/tmp")):
+            self.assertEqual(self.bridge.exec_cwd(), "/mnt/c")
+        with mock.patch.object(
+            WslBridge, "temp_root", return_value=Path("/mnt/c/Temp/cc-voicepeak")
+        ):
+            self.assertEqual(self.bridge.exec_cwd(), "/mnt/c/Temp/cc-voicepeak")
+
+    def test_temp_root_env_override(self):
+        bridge = WslBridge()
+        with mock.patch.dict(os.environ, {"CC_VOICEPEAK_TEMP": "/mnt/c/mytemp"}):
+            self.assertEqual(bridge.temp_root(), Path("/mnt/c/mytemp"))
+
+
+class LocalBridgeTest(unittest.TestCase):
+    def test_paths_pass_through(self):
+        bridge = LocalBridge(temp_root=Path("/tmp/x"))
+        self.assertEqual(bridge.to_win("/tmp/a.wav"), "/tmp/a.wav")
+        self.assertEqual(bridge.to_linux("/tmp/a.wav"), Path("/tmp/a.wav"))
+        self.assertEqual(bridge.temp_root(), Path("/tmp/x"))
+
+
+class DetectBridgeTest(unittest.TestCase):
+    def test_force_local(self):
+        self.assertEqual(detect_bridge("local").name, "local")
+
+    def test_force_wsl(self):
+        self.assertEqual(detect_bridge("wsl").name, "wsl")
+
+    def test_unknown_mode(self):
+        with self.assertRaises(BridgeError):
+            detect_bridge("banana")
+
+    def test_env_selects_bridge(self):
+        with mock.patch.dict(os.environ, {"CC_VOICEPEAK_BRIDGE": "local"}):
+            self.assertEqual(detect_bridge().name, "local")
+
+
+class ResolveExeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.exe = self.tmp / "voicepeak.exe"
+        self.exe.write_text("", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_configured_path_is_used(self):
+        bridge = LocalBridge()
+        self.assertEqual(resolve_exe(bridge, str(self.exe)), self.exe)
+
+    def test_missing_configured_path_raises(self):
+        with self.assertRaises(BridgeError):
+            resolve_exe(LocalBridge(), "/nonexistent/voicepeak.exe")
+
+    def test_windows_style_configured_path_is_converted(self):
+        bridge = WslBridge()
+        with mock.patch.object(WslBridge, "to_linux", return_value=self.exe):
+            self.assertEqual(resolve_exe(bridge, "C:\\VOICEPEAK\\voicepeak.exe"), self.exe)
+
+    def test_autodetect_failure_raises(self):
+        bridge = LocalBridge()
+        with mock.patch.object(LocalBridge, "find_voicepeak", return_value=None):
+            with self.assertRaises(BridgeError):
+                resolve_exe(bridge, None)
+
+    def test_wsl_autodetect_scans_program_files(self):
+        bridge = WslBridge()
+        real_is_file = Path.is_file
+        target = "/mnt/c/Program Files/VOICEPEAK/voicepeak.exe"
+
+        def fake_is_file(self):
+            return str(self) == target or real_is_file(self)
+
+        def fake_is_dir(self):
+            return str(self) == "/mnt/c"
+
+        with mock.patch.object(Path, "is_file", fake_is_file), mock.patch.object(
+            Path, "is_dir", fake_is_dir
+        ):
+            self.assertEqual(str(bridge.find_voicepeak()), target)
+
+
+class PlayerScriptTest(unittest.TestCase):
+    def test_encoded_command_is_utf16_base64(self):
+        encoded = _encoded_command("echo hi")
+        self.assertEqual(base64.b64decode(encoded).decode("utf-16-le"), "echo hi")
+
+    def test_player_script_reports_pid_and_plays_sync(self):
+        self.assertIn("PID", _PS_SCRIPT)
+        self.assertIn("PlaySync", _PS_SCRIPT)
+        self.assertIn("__QUIT__", _PS_SCRIPT)
+
+    def test_none_backend(self):
+        self.assertEqual(select_player("none", LocalBridge()).name, "none")
+
+    def test_wsl_bridge_defaults_to_powershell(self):
+        player = select_player("auto", WslBridge())
+        self.assertEqual(player.name, "powershell")
+
+    def test_missing_command_backend_raises(self):
+        from cc_voicepeak.errors import PlayerError
+
+        with mock.patch("shutil.which", return_value=None):
+            with self.assertRaises(PlayerError):
+                select_player("paplay", LocalBridge())

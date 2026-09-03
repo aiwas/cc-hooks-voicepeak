@@ -1,0 +1,27 @@
+{
+  "$comment": "Claude Code の .claude/settings.json にマージする例。Stop でタスク完了を、Notification で許可待ちを読み上げる。",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/bin/cc-voicepeak hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/bin/cc-voicepeak hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

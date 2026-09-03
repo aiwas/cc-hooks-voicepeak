@@ -1,0 +1,51 @@
+{
+  "$comment": "cc-voicepeak の設定例。.claude/voicepeak.json か ~/.config/cc-voicepeak/config.json に置く。",
+
+  "voicepeak": {
+    "exe": "/mnt/c/Program Files/VOICEPEAK/voicepeak.exe",
+    "narrator": "Miyamai Moca",
+    "emotion": "honwaka=30",
+    "speed": 110,
+    "pitch": 0,
+    "char_limit": 140,
+    "input_mode": "say",
+    "cache": true
+  },
+
+  "split": {
+    "min_fill": 0.55,
+    "balance_tail": true
+  },
+
+  "normalize": {
+    "code_blocks": "placeholder",
+    "strip_urls": true,
+    "shorten_paths": true,
+    "max_total_chars": 0,
+    "replacements": [
+      ["(?i)\\bPR\\b", "プルリク"],
+      ["(?i)\\bCI\\b", "シーアイ"],
+      ["(?i)\\bWSL\\b", "ダブリューエスエル"],
+      ["(?i)\\bvoicepeak\\b", "ボイスピーク"]
+    ]
+  },
+
+  "player": {
+    "backend": "auto",
+    "concat": false
+  },
+
+  "hook": {
+    "events": ["Stop", "Notification"],
+    "on_busy": "replace",
+    "min_chars": 2,
+    "prefix": "",
+    "suffix": "",
+    "subagent": false,
+    "detach": true
+  },
+
+  "log": {
+    "level": "info"
+  }
+}

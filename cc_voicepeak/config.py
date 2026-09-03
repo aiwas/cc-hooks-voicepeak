@@ -1,0 +1,302 @@
+"""設定の読み込みとデフォルト値.
+
+優先順位 (後のものが前のものを上書き):
+
+1. 組み込みデフォルト
+2. ``~/.config/cc-voicepeak/config.json`` (XDG_CONFIG_HOME 対応)
+3. プロジェクト内 ``.claude/voicepeak.json`` (CLAUDE_PROJECT_DIR / cwd から探索)
+4. 環境変数 ``CC_VOICEPEAK_CONFIG`` が指すファイル
+5. 環境変数による個別上書き (``CC_VOICEPEAK_*``)
+6. コマンドライン引数
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from .errors import ConfigError
+
+# voicepeak が 1 回の起動で受け付ける最大文字数。
+# 141 文字以上を渡すとエラーになり wav が出力されないため、既定は安全側の 140。
+VOICEPEAK_CHAR_LIMIT = 140
+
+DEFAULTS: Dict[str, Any] = {
+    # ---- voicepeak 本体 -------------------------------------------------
+    "voicepeak": {
+        # WSL パス (/mnt/c/...) でも Windows パス (C:\...) でも可。null なら自動探索。
+        "exe": None,
+        "narrator": None,          # 例: "Miyamai Moca" / "女性1"
+        "emotion": None,           # 例: "happy=50,sad=0"
+        "speed": None,             # 50-200
+        "pitch": None,             # -300-300
+        "char_limit": VOICEPEAK_CHAR_LIMIT,
+        # say: -s で argv 渡し / text_file: -t でファイル渡し
+        "input_mode": "say",
+        # 1 ブロックあたりのタイムアウト秒
+        "timeout": 120,
+        # 失敗時のリトライ回数 (input_mode を切り替えて再試行する)
+        "retries": 1,
+        # 同じ文面 + 同じ声の wav を再利用する
+        "cache": True,
+        "cache_max_files": 400,
+    },
+    # ---- 分割 -----------------------------------------------------------
+    "split": {
+        # 文字数の数え方: "codepoints" (voicepeak と同じ) / "halfwidth_half"
+        "width_mode": "codepoints",
+        # ブロックをどれくらい詰めてから区切るか (0.0-1.0)。
+        # 大きいほど EXE 起動回数が減り、小さいほど区切りが自然になる。
+        "min_fill": 0.55,
+        # 最後のブロックが極端に短い場合に前のブロックと均す
+        "balance_tail": True,
+        # 空白のみ/記号のみのブロックを捨てる
+        "drop_empty": True,
+    },
+    # ---- 読み上げ用テキスト整形 ------------------------------------------
+    "normalize": {
+        "enabled": True,
+        # コードブロックの扱い: "drop" / "placeholder" / "read"
+        "code_blocks": "placeholder",
+        "code_block_placeholder": "コードブロック。",
+        # インラインコードのバッククォートを外して中身は読む
+        "inline_code": "read",
+        "strip_urls": True,
+        "url_placeholder": "リンク",
+        # /a/b/c.py -> c.py
+        "shorten_paths": True,
+        "strip_emoji": True,
+        # 表の扱い: "drop" / "read"
+        "tables": "drop",
+        "max_total_chars": 0,      # 0 なら無制限
+        "truncated_suffix": "以下省略。",
+        # 読み替え辞書 (正規表現 -> 読み)。上から順に適用。
+        "replacements": [
+            ["(?i)\\bPR\\b", "プルリク"],
+            ["(?i)\\bCI\\b", "シーアイ"],
+            ["(?i)\\bWSL\\b", "ダブリューエスエル"],
+            ["(?i)\\bLGTM\\b", "オッケー"],
+            ["(?i)\\bTODO\\b", "トゥドゥ"],
+        ],
+    },
+    # ---- 再生 -----------------------------------------------------------
+    "player": {
+        # "auto" / "powershell" / "paplay" / "aplay" / "ffplay" / "none"
+        "backend": "auto",
+        # true: 全ブロックを 1 本の wav に連結してから再生 (完全に無音間隔なし)
+        # false: 合成できたブロックから順次再生 (初音までが速い)
+        "concat": False,
+        "volume": None,            # ffplay/paplay 用 (0-100)
+    },
+    # ---- Hook 動作 ------------------------------------------------------
+    "hook": {
+        # 反応するイベント
+        "events": ["Stop", "Notification"],
+        # 同じセッションで前の読み上げが残っている場合の挙動:
+        # "replace" (割り込み) / "queue" (待つ) / "skip" (捨てる)
+        "on_busy": "replace",
+        # これより短いテキストは読まない
+        "min_chars": 2,
+        # 読み上げの前後に付ける定型句
+        "prefix": "",
+        "suffix": "",
+        # Notification イベント用の定型句
+        "notification_prefix": "",
+        # SubagentStop で読み上げるか
+        "subagent": False,
+        # true なら hook プロセスは即座に return し、読み上げは別プロセスで継続する
+        "detach": True,
+    },
+    "log": {
+        # null なら $XDG_STATE_HOME/cc-voicepeak/cc-voicepeak.log
+        "file": None,
+        "level": "info",           # debug / info / warning / error / off
+        "max_bytes": 1048576,
+    },
+}
+
+_ENV_MAP = {
+    "CC_VOICEPEAK_EXE": ("voicepeak", "exe"),
+    "CC_VOICEPEAK_NARRATOR": ("voicepeak", "narrator"),
+    "CC_VOICEPEAK_EMOTION": ("voicepeak", "emotion"),
+    "CC_VOICEPEAK_SPEED": ("voicepeak", "speed"),
+    "CC_VOICEPEAK_PITCH": ("voicepeak", "pitch"),
+    "CC_VOICEPEAK_CHAR_LIMIT": ("voicepeak", "char_limit"),
+    "CC_VOICEPEAK_INPUT_MODE": ("voicepeak", "input_mode"),
+    "CC_VOICEPEAK_PLAYER": ("player", "backend"),
+    "CC_VOICEPEAK_LOG_LEVEL": ("log", "level"),
+    "CC_VOICEPEAK_LOG_FILE": ("log", "file"),
+}
+
+_INT_KEYS = {
+    ("voicepeak", "speed"),
+    ("voicepeak", "pitch"),
+    ("voicepeak", "char_limit"),
+    ("voicepeak", "timeout"),
+    ("voicepeak", "retries"),
+    ("voicepeak", "cache_max_files"),
+    ("normalize", "max_total_chars"),
+    ("hook", "min_chars"),
+    ("log", "max_bytes"),
+}
+
+
+class Config:
+    """ネストした dict を ``cfg.get("voicepeak.narrator")`` で引ける薄いラッパ."""
+
+    def __init__(self, data: Dict[str, Any], sources: Optional[List[Path]] = None):
+        self._data = data
+        self.sources: List[Path] = sources or []
+
+    # -- アクセサ ---------------------------------------------------------
+    def get(self, dotted: str, default: Any = None) -> Any:
+        node: Any = self._data
+        for part in dotted.split("."):
+            if not isinstance(node, dict) or part not in node:
+                return default
+            node = node[part]
+        return node
+
+    def set(self, dotted: str, value: Any) -> None:
+        parts = dotted.split(".")
+        node = self._data
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+
+    def section(self, name: str) -> Dict[str, Any]:
+        value = self.get(name, {})
+        return value if isinstance(value, dict) else {}
+
+    def as_dict(self) -> Dict[str, Any]:
+        return copy.deepcopy(self._data)
+
+    def __repr__(self) -> str:  # pragma: no cover - デバッグ用
+        return f"Config(sources={[str(p) for p in self.sources]})"
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def _coerce(path: tuple, value: Any) -> Any:
+    if path in _INT_KEYS and isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise ConfigError(f"{'.'.join(path)} は整数で指定してください: {value!r}") from exc
+    return value
+
+
+def config_search_paths() -> List[Path]:
+    """探索対象の設定ファイルを優先度の低い順に返す."""
+    paths: List[Path] = []
+
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    config_home = Path(xdg) if xdg else Path.home() / ".config"
+    paths.append(config_home / "cc-voicepeak" / "config.json")
+
+    project = os.environ.get("CLAUDE_PROJECT_DIR")
+    roots: List[Path] = []
+    if project:
+        roots.append(Path(project))
+    roots.append(Path.cwd())
+    for root in roots:
+        candidate = root / ".claude" / "voicepeak.json"
+        if candidate not in paths:
+            paths.append(candidate)
+
+    explicit = os.environ.get("CC_VOICEPEAK_CONFIG")
+    if explicit:
+        paths.append(Path(explicit).expanduser())
+
+    return paths
+
+
+def load_config(
+    extra_paths: Optional[List[Path]] = None,
+    overrides: Optional[Dict[str, Any]] = None,
+    use_env: bool = True,
+) -> Config:
+    """設定を読み込んで :class:`Config` を返す."""
+    data = copy.deepcopy(DEFAULTS)
+    used: List[Path] = []
+
+    candidates = config_search_paths()
+    if extra_paths:
+        candidates.extend(Path(p).expanduser() for p in extra_paths)
+
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            with path.open(encoding="utf-8") as handle:
+                loaded = json.load(handle)
+        except OSError:
+            continue
+        except json.JSONDecodeError as exc:
+            raise ConfigError(f"設定ファイルの JSON が壊れています: {path}: {exc}") from exc
+        if not isinstance(loaded, dict):
+            raise ConfigError(f"設定ファイルのトップレベルはオブジェクトにしてください: {path}")
+        _deep_merge(data, loaded)
+        used.append(path)
+
+    if use_env:
+        for env_name, path_tuple in _ENV_MAP.items():
+            raw = os.environ.get(env_name)
+            if raw is None or raw == "":
+                continue
+            node = data
+            for part in path_tuple[:-1]:
+                node = node.setdefault(part, {})
+            node[path_tuple[-1]] = _coerce(path_tuple, raw)
+
+    cfg = Config(data, used)
+
+    for dotted, value in (overrides or {}).items():
+        if value is None:
+            continue
+        cfg.set(dotted, _coerce(tuple(dotted.split(".")), value))
+
+    _validate(cfg)
+    return cfg
+
+
+def _validate(cfg: Config) -> None:
+    limit = cfg.get("voicepeak.char_limit")
+    if not isinstance(limit, int) or not 1 <= limit <= VOICEPEAK_CHAR_LIMIT:
+        raise ConfigError(
+            f"voicepeak.char_limit は 1..{VOICEPEAK_CHAR_LIMIT} で指定してください: {limit!r}"
+        )
+
+    mode = cfg.get("voicepeak.input_mode")
+    if mode not in ("say", "text_file"):
+        raise ConfigError(f'voicepeak.input_mode は "say" か "text_file" です: {mode!r}')
+
+    min_fill = cfg.get("split.min_fill")
+    if not isinstance(min_fill, (int, float)) or not 0.0 <= float(min_fill) <= 1.0:
+        raise ConfigError(f"split.min_fill は 0.0-1.0 の数値です: {min_fill!r}")
+
+    speed = cfg.get("voicepeak.speed")
+    if speed is not None and not 50 <= int(speed) <= 200:
+        raise ConfigError(f"voicepeak.speed は 50-200 です: {speed!r}")
+
+    pitch = cfg.get("voicepeak.pitch")
+    if pitch is not None and not -300 <= int(pitch) <= 300:
+        raise ConfigError(f"voicepeak.pitch は -300-300 です: {pitch!r}")
+
+    backend = cfg.get("player.backend")
+    if backend not in ("auto", "powershell", "paplay", "aplay", "ffplay", "none"):
+        raise ConfigError(f"player.backend の値が不正です: {backend!r}")
+
+    on_busy = cfg.get("hook.on_busy")
+    if on_busy not in ("replace", "queue", "skip"):
+        raise ConfigError(f'hook.on_busy は "replace"/"queue"/"skip" です: {on_busy!r}')
