@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .bridge import Bridge, detect_bridge, interop_enabled, is_wsl, resolve_exe
-from .config import Config
+from .config import Config, unknown_keys
 from .errors import CcVoicepeakError
 from .player import find_powershell
 
@@ -193,6 +193,17 @@ def run_checks(cfg: Config, do_synth: bool = False) -> List[CheckItem]:
         )
     else:
         items.append(CheckItem("設定ファイル", WARN, "未検出 (既定値で動作します)"))
+
+    unknown = unknown_keys(cfg)
+    if unknown:
+        items.append(
+            CheckItem(
+                "設定キー",
+                WARN,
+                ", ".join(unknown),
+                "既定値に無いキーです。綴り誤りの可能性があります",
+            )
+        )
 
     if cfg.get("voicepeak.narrator"):
         items.append(CheckItem("ナレーター", OK, str(cfg.get("voicepeak.narrator"))))

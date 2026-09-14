@@ -4,10 +4,15 @@
 
 1. 組み込みデフォルト
 2. ``~/.config/cc-voicepeak/config.json`` (XDG_CONFIG_HOME 対応)
-3. プロジェクト内 ``.claude/voicepeak.json`` (CLAUDE_PROJECT_DIR / cwd から探索)
+3. プロジェクト内 ``.claude/voicepeak.json``
+   (``CLAUDE_PROJECT_DIR`` があればそこ、無ければ cwd)
 4. 環境変数 ``CC_VOICEPEAK_CONFIG`` が指すファイル
 5. 環境変数による個別上書き (``CC_VOICEPEAK_*``)
-6. コマンドライン引数
+6. ``--config`` で指定したファイル
+7. コマンドライン引数
+
+4 までがファイル、5 以降がその場の指定。``--config`` はコマンドライン引数なので
+環境変数より後に重ねる。
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ import copy
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from .errors import ConfigError
 
@@ -196,6 +201,21 @@ def _coerce(path: tuple, value: Any) -> Any:
     return value
 
 
+def _coerce_known_keys(data: Dict[str, Any]) -> None:
+    """設定ファイル由来の値にも型変換をかける.
+
+    環境変数と CLI 引数は ``_coerce()`` を通っていたが、JSON 由来の値は
+    素通しだったため ``{"voicepeak": {"speed": "fast"}}`` が生の ValueError に
+    なっていた。ここで ``ConfigError`` に揃える。
+    """
+    for path in _INT_KEYS:
+        node: Any = data
+        for part in path[:-1]:
+            node = node.get(part) if isinstance(node, dict) else None
+        if isinstance(node, dict) and path[-1] in node:
+            node[path[-1]] = _coerce(path, node[path[-1]])
+
+
 def config_search_paths() -> List[Path]:
     """探索対象の設定ファイルを優先度の低い順に返す."""
     paths: List[Path] = []
@@ -204,15 +224,11 @@ def config_search_paths() -> List[Path]:
     config_home = Path(xdg) if xdg else Path.home() / ".config"
     paths.append(config_home / "cc-voicepeak" / "config.json")
 
+    # CLAUDE_PROJECT_DIR があるときは cwd を足さない。
+    # 足すと cwd 側が後勝ちになり、プロジェクト設定を意図せず上書きしてしまう。
     project = os.environ.get("CLAUDE_PROJECT_DIR")
-    roots: List[Path] = []
-    if project:
-        roots.append(Path(project))
-    roots.append(Path.cwd())
-    for root in roots:
-        candidate = root / ".claude" / "voicepeak.json"
-        if candidate not in paths:
-            paths.append(candidate)
+    root = Path(project) if project else Path.cwd()
+    paths.append(root / ".claude" / "voicepeak.json")
 
     explicit = os.environ.get("CC_VOICEPEAK_CONFIG")
     if explicit:
@@ -221,20 +237,29 @@ def config_search_paths() -> List[Path]:
     return paths
 
 
-def load_config(
-    extra_paths: Optional[List[Path]] = None,
-    overrides: Optional[Dict[str, Any]] = None,
-    use_env: bool = True,
-) -> Config:
-    """設定を読み込んで :class:`Config` を返す."""
-    data = copy.deepcopy(DEFAULTS)
-    used: List[Path] = []
+def unknown_keys(cfg: Config) -> List[str]:
+    """``DEFAULTS`` に無いキーを ``"voicepeak.narator"`` の形で列挙する.
 
-    candidates = config_search_paths()
-    if extra_paths:
-        candidates.extend(Path(p).expanduser() for p in extra_paths)
+    綴り誤りは黙って無視されてしまうので、``check`` で警告するために使う。
+    """
+    return sorted(_walk_unknown(cfg.as_dict(), DEFAULTS, ""))
 
-    for path in candidates:
+
+def _walk_unknown(data: Dict[str, Any], defaults: Dict[str, Any], prefix: str) -> List[str]:
+    found: List[str] = []
+    for key, value in data.items():
+        dotted = f"{prefix}{key}"
+        if key not in defaults:
+            found.append(dotted)
+            continue
+        if isinstance(value, dict) and isinstance(defaults[key], dict):
+            found.extend(_walk_unknown(value, defaults[key], f"{dotted}."))
+    return found
+
+
+def _merge_files(data: Dict[str, Any], paths: List[Path], used: List[Path]) -> None:
+    """設定ファイルを順に読み込んで ``data`` へ重ねる."""
+    for path in paths:
         try:
             if not path.is_file():
                 continue
@@ -249,6 +274,18 @@ def load_config(
         _deep_merge(data, loaded)
         used.append(path)
 
+
+def load_config(
+    extra_paths: Optional[List[Path]] = None,
+    overrides: Optional[Dict[str, Any]] = None,
+    use_env: bool = True,
+) -> Config:
+    """設定を読み込んで :class:`Config` を返す."""
+    data = copy.deepcopy(DEFAULTS)
+    used: List[Path] = []
+
+    _merge_files(data, config_search_paths(), used)
+
     if use_env:
         for env_name, path_tuple in _ENV_MAP.items():
             raw = os.environ.get(env_name)
@@ -259,6 +296,11 @@ def load_config(
                 node = node.setdefault(part, {})
             node[path_tuple[-1]] = _coerce(path_tuple, raw)
 
+    # --config はコマンドライン引数なので、環境変数より後に重ねる
+    if extra_paths:
+        _merge_files(data, [Path(p).expanduser() for p in extra_paths], used)
+
+    _coerce_known_keys(data)
     cfg = Config(data, used)
 
     for dotted, value in (overrides or {}).items():
@@ -270,33 +312,61 @@ def load_config(
     return cfg
 
 
+def _check_int(cfg: Config, key: str, low: int, high: Optional[int] = None) -> None:
+    """``None`` を許す整数キーの範囲検査 (bool は整数として扱わない)."""
+    value = cfg.get(key)
+    if value is None:
+        return
+    limit = f"{low} 以上" if high is None else f"{low}-{high}"
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"{key} は整数で指定してください ({limit}): {value!r}")
+    if value < low or (high is not None and value > high):
+        raise ConfigError(f"{key} は {limit} です: {value!r}")
+
+
+def _check_choice(cfg: Config, key: str, choices: Sequence[str]) -> None:
+    value = cfg.get(key)
+    if value not in choices:
+        allowed = " / ".join(repr(choice) for choice in choices)
+        raise ConfigError(f"{key} は {allowed} のいずれかです: {value!r}")
+
+
 def _validate(cfg: Config) -> None:
     limit = cfg.get("voicepeak.char_limit")
-    if not isinstance(limit, int) or not 1 <= limit <= VOICEPEAK_CHAR_LIMIT:
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= VOICEPEAK_CHAR_LIMIT:
         raise ConfigError(
             f"voicepeak.char_limit は 1..{VOICEPEAK_CHAR_LIMIT} で指定してください: {limit!r}"
         )
 
-    mode = cfg.get("voicepeak.input_mode")
-    if mode not in ("say", "text_file"):
-        raise ConfigError(f'voicepeak.input_mode は "say" か "text_file" です: {mode!r}')
-
     min_fill = cfg.get("split.min_fill")
-    if not isinstance(min_fill, (int, float)) or not 0.0 <= float(min_fill) <= 1.0:
+    if (
+        isinstance(min_fill, bool)
+        or not isinstance(min_fill, (int, float))
+        or not 0.0 <= float(min_fill) <= 1.0
+    ):
         raise ConfigError(f"split.min_fill は 0.0-1.0 の数値です: {min_fill!r}")
 
-    speed = cfg.get("voicepeak.speed")
-    if speed is not None and not 50 <= int(speed) <= 200:
-        raise ConfigError(f"voicepeak.speed は 50-200 です: {speed!r}")
+    _check_int(cfg, "voicepeak.speed", 50, 200)
+    _check_int(cfg, "voicepeak.pitch", -300, 300)
+    _check_int(cfg, "voicepeak.timeout", 1)
+    _check_int(cfg, "voicepeak.retries", 0)
+    _check_int(cfg, "voicepeak.cache_max_files", 0)
+    _check_int(cfg, "normalize.max_total_chars", 0)
+    _check_int(cfg, "hook.min_chars", 0)
+    _check_int(cfg, "player.volume", 0, 100)
+    _check_int(cfg, "log.max_bytes", 1)
 
-    pitch = cfg.get("voicepeak.pitch")
-    if pitch is not None and not -300 <= int(pitch) <= 300:
-        raise ConfigError(f"voicepeak.pitch は -300-300 です: {pitch!r}")
+    _check_choice(cfg, "voicepeak.input_mode", ("say", "text_file"))
+    _check_choice(cfg, "split.width_mode", ("codepoints", "halfwidth_half"))
+    _check_choice(cfg, "normalize.code_blocks", ("drop", "placeholder", "read"))
+    _check_choice(cfg, "normalize.inline_code", ("read", "drop"))
+    _check_choice(cfg, "normalize.tables", ("drop", "read"))
+    _check_choice(
+        cfg, "player.backend", ("auto", "powershell", "paplay", "aplay", "ffplay", "none")
+    )
+    _check_choice(cfg, "hook.on_busy", ("replace", "queue", "skip"))
+    _check_choice(cfg, "log.level", ("debug", "info", "warning", "error", "off"))
 
-    backend = cfg.get("player.backend")
-    if backend not in ("auto", "powershell", "paplay", "aplay", "ffplay", "none"):
-        raise ConfigError(f"player.backend の値が不正です: {backend!r}")
-
-    on_busy = cfg.get("hook.on_busy")
-    if on_busy not in ("replace", "queue", "skip"):
-        raise ConfigError(f'hook.on_busy は "replace"/"queue"/"skip" です: {on_busy!r}')
+    events = cfg.get("hook.events")
+    if not isinstance(events, list) or not all(isinstance(event, str) for event in events):
+        raise ConfigError(f"hook.events は文字列のリストです: {events!r}")

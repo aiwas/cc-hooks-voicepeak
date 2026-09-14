@@ -262,10 +262,16 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
 ## 設定の仕組み
 
 `config.py` の `DEFAULTS` が設定側の既定値定義（`normalize.DEFAULT_OPTIONS` とは別）。
-読み込み順は README の通りで、
-`_deep_merge()` で再帰マージし、`_ENV_MAP` の環境変数、最後に CLI 引数を重ねる。
-`_INT_KEYS` に入っているキーは文字列から int に変換される。`_validate()` が
-`voicepeak.char_limit <= 140` などの不変条件を検査する。
+読み込み順は README の通りで、`_merge_files()` がファイルを `_deep_merge()` で再帰
+マージし、`_ENV_MAP` の環境変数、`--config` のファイル、最後に CLI 引数を重ねる。
+`--config` を環境変数より後に置いているのは、これがコマンドライン引数だから。
+プロジェクト設定の探索は `CLAUDE_PROJECT_DIR` があればそこだけ、無ければ cwd。
+
+`_INT_KEYS` に入っているキーは、環境変数・CLI 引数・**設定ファイル**のいずれから
+来ても `_coerce_known_keys()` で int に変換される（変換できなければ `ConfigError`）。
+`_validate()` が `voicepeak.char_limit <= 140` などの不変条件を検査する。
+`DEFAULTS` に無いキーは `unknown_keys()` が拾い、`check` が WARN として表示する
+（読み込み自体は通る）。
 
 設定キーを追加するときは、`DEFAULTS` に既定値を書き、必要なら `_ENV_MAP` /
 `_INT_KEYS` と `_validate()`、README の設定表も合わせて更新する。

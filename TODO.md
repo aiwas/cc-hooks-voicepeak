@@ -41,14 +41,7 @@
 `tests/test_locking.py:131` の `test_lock_timeout_does_not_raise` は
 「例外が出ないこと」しか見ておらず、この危険な挙動を仕様として固定してしまっている。
 
-### 4. 設定ファイル由来の値が型変換されない — `config.py:289`
-
-`_coerce()` は環境変数と CLI override にしか適用されず、JSON 由来の値は素通し。
-`{"voicepeak":{"speed":"fast"}}` で `int(speed)` が生の `ValueError` を送出する（4 の経路）。
-`_validate()` 内の `int()` を `ConfigError` に変換するか、`_deep_merge` 後に
-`_INT_KEYS` へ `_coerce` を適用する。
-
-### 5. インラインコード内のスネークケースが壊れる — `normalize.py:184`
+### 4. インラインコード内のスネークケースが壊れる — `normalize.py:184`
 
 [確認済] 強調記号の除去がインラインコード展開より前に走るため、`_` と `*` を巻き込む。
 
@@ -62,7 +55,7 @@
 `_INLINE_CODE` を先に処理して中身をプレースホルダで保護する。加えて `_` の強調は
 前後が単語構成文字でない場合に限定する。
 
-### 6. パスでない文字列がパス扱いされ前半が消える — `normalize.py:34`
+### 5. パスでない文字列がパス扱いされ前半が消える — `normalize.py:34`
 
 [確認済] `_PATHISH` の `\w` が Unicode 対応のため、日本語や日付を巻き込む。
 
@@ -75,26 +68,26 @@
 `(?:[\w.\-]+/){1,}` の分岐を ASCII に限定し、末尾要素が既知の拡張子を持つ場合のみ
 短縮する。
 
-### 7. 閉じられていないコードフェンス以降の本文が消える — `normalize.py:95`
+### 6. 閉じられていないコードフェンス以降の本文が消える — `normalize.py:95`
 
 [確認済] `前。\n```py\ncode()\nまだ続く本文です。` → `前。\nコードブロック。`。
 フェンスの数が奇数になる出力（フェンスを含むコード例、途中で切れた応答）で発生する。
 フェンス内の行をバッファし、EOF 時点で未クローズなら本文として復帰させる。
 
-### 8. `_balance_tail()` が区切りなしで連結する — `splitter.py:386`
+### 7. `_balance_tail()` が区切りなしで連結する — `splitter.py:386`
 
 `("" if blocks[-2].endswith("\n") else "")` は両分岐とも空文字で、区切り挿入の意図が
 失われている。`split_text` が境界で `lstrip()` した空白が復元されず、
 `"word"` + `"tail"` → `"wordtail"` のように単語が繋がる。
 
-### 9. 割り込み時に作業ディレクトリが必ず残る — `synth.py:128` / `pipeline.py:208`
+### 8. 割り込み時に作業ディレクトリが必ず残る — `synth.py:128` / `pipeline.py:208`
 
 `work_dir = <temp>/run/<pid>` の削除は `pipeline.speak` の `finally` にしかない。
 既定の `on_busy=replace` では対象プロセスが SIGKILL されるため実行されず、
 Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 起動時に古い `run/*` を掃除する処理は存在しない。
 
-### 10. stale / 再利用された PID のプロセスグループを killpg する — `locking.py:157`
+### 9. stale / 再利用された PID のプロセスグループを killpg する — `locking.py:157`
 
 生存判定が `os.kill(pid, 0)` のみ。PID 再利用時に無関係なプロセス群を停止させ得る。
 状態ファイルに `/proc/<pid>/stat` の starttime か cmdline の照合値を記録し、
@@ -137,20 +130,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
   `killed = True` にする
 - **`cli.py:216`** busy 判定と `slot.write()` の間に TOCTOU があり、
   `wait_until_free()` が False を返してもそのまま進むため読み上げが重なる
-
-### 設定・CLI
-
-- **`config.py:233`** `--config` で渡したファイルが環境変数に負ける
-  （「CLI 引数が最優先」という規約と不整合）
-- **`config.py:207`** cwd の `.claude/voicepeak.json` が `CLAUDE_PROJECT_DIR` 側より
-  優先される。README には明記済みだが、`CLAUDE_PROJECT_DIR` があるときは cwd 候補を
-  足さない方が素直
-- **`config.py:273`** バリデーション漏れ。未検証: `split.width_mode` /
-  `normalize.code_blocks` / `inline_code` / `tables` / `log.level` / `hook.events` の型 /
-  `voicepeak.timeout`（0・負値）/ `retries` / `cache_max_files` / `hook.min_chars` /
-  `normalize.max_total_chars`（負値）
-- **`config.py:181`** 未知キー・タイポが黙って通る。`narator` のような綴り誤りが無反応。
-  `DEFAULTS` に無いキーを `check` で WARN として列挙したい
 
 ### ログ
 
@@ -247,10 +226,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 ### 未検証の分岐
 
 - **`on_busy` の 3 分岐**（`cli.py:213`）— `test_locking.py` は `SpeechSlot` 単体のみ
-- **設定優先順位** — `CC_VOICEPEAK_CONFIG`、`--config`、cwd フォールバックが未検証
-- **バリデーション** — `test_config.py:86` は char_limit / speed / player のみ。
-  `pitch`・`on_busy`・`input_mode`・`min_fill`・トップレベルが dict でない JSON・
-  設定ファイル内の非数値文字列（高 4）が未カバー
 - **CLI** — `speak --player`、`speak --concat`
 - **`locking.py`** — `update()`、`clear()` の他プロセス判定、taskkill 失敗時、
   `wait_until_free` が True を返す経路

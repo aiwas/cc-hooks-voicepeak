@@ -159,11 +159,11 @@ $ ./bin/cc-voicepeak split -f notes.md
 
 1. 組み込みデフォルト
 2. `~/.config/cc-voicepeak/config.json`（`$XDG_CONFIG_HOME` 対応）
-3. `$CLAUDE_PROJECT_DIR/.claude/voicepeak.json`、および カレントディレクトリの
-   `.claude/voicepeak.json`
+3. `.claude/voicepeak.json`（`$CLAUDE_PROJECT_DIR` が設定されていればそこ、
+   無ければカレントディレクトリ）
 4. `$CC_VOICEPEAK_CONFIG` が指すファイル
-5. `--config PATH` で指定したファイル
-6. 環境変数（`CC_VOICEPEAK_EXE` `CC_VOICEPEAK_NARRATOR` `CC_VOICEPEAK_PLAYER` など）
+5. 環境変数（`CC_VOICEPEAK_EXE` `CC_VOICEPEAK_NARRATOR` `CC_VOICEPEAK_PLAYER` など）
+6. `--config PATH` で指定したファイル
 7. コマンドライン引数
 
 よく使うキーは以下。全項目は `cc-voicepeak check --print-config` で確認できる。
