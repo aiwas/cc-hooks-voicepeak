@@ -16,6 +16,7 @@ from typing import List, Optional
 from .bridge import Bridge, detect_bridge, interop_enabled, is_wsl, resolve_exe
 from .config import Config
 from .errors import CcVoicepeakError
+from .player import find_powershell
 
 OK = "OK"
 WARN = "WARN"
@@ -37,6 +38,51 @@ class CheckItem:
         if self.hint and self.status != OK:
             text += f"\n       → {self.hint}"
         return text
+
+
+_APT_PACKAGES = {"paplay": "pulseaudio-utils", "aplay": "alsa-utils", "ffplay": "ffmpeg"}
+
+
+def _command_player_check(backend: str) -> CheckItem:
+    found = shutil.which(backend)
+    return CheckItem(
+        f"再生 ({backend})",
+        OK if found else FAIL,
+        found or "見つかりません",
+        f"apt install {_APT_PACKAGES.get(backend, backend)}",
+    )
+
+
+def _player_check(backend: str, bridge: Bridge) -> CheckItem:
+    """``player.backend`` の設定に対して、実際に使える再生手段があるかを見る."""
+    if backend == "none":
+        return CheckItem("再生 (none)", OK, "再生せず合成だけ行います")
+    if backend in ("paplay", "aplay", "ffplay"):
+        return _command_player_check(backend)
+
+    if backend == "powershell" or (backend == "auto" and bridge.name == "wsl"):
+        found = find_powershell()
+        if found:
+            return CheckItem("再生 (powershell.exe)", OK, found)
+        if backend == "powershell":
+            return CheckItem(
+                "再生 (powershell.exe)",
+                FAIL,
+                "見つかりません",
+                "/etc/wsl.conf の [interop] appendWindowsPath=true を確認してください",
+            )
+        # auto なので WSL 側のコマンドへ落ちる。どれも無ければ無音になる
+
+    for candidate in ("paplay", "aplay", "ffplay"):
+        found = shutil.which(candidate)
+        if found:
+            return CheckItem(f"再生 (auto → {candidate})", OK, found)
+    return CheckItem(
+        "再生 (auto)",
+        WARN,
+        "使える再生コマンドがありません (合成のみ行います)",
+        "apt install pulseaudio-utils で paplay を入れるか player.backend を設定してください",
+    )
 
 
 def run_checks(cfg: Config, do_synth: bool = False) -> List[CheckItem]:
@@ -126,31 +172,19 @@ def run_checks(cfg: Config, do_synth: bool = False) -> List[CheckItem]:
 
     # 4. 再生系
     backend = str(cfg.get("player.backend", "auto"))
-    if backend in ("auto", "powershell") and bridge.name == "wsl":
-        found = shutil.which("powershell.exe") or shutil.which("pwsh.exe")
-        if found:
-            items.append(CheckItem("再生 (powershell.exe)", OK, found))
-        else:
-            items.append(
-                CheckItem(
-                    "再生 (powershell.exe)",
-                    FAIL,
-                    "PATH に見つかりません",
-                    "/etc/wsl.conf の [interop] appendWindowsPath=true を確認してください",
-                )
-            )
-    elif backend in ("paplay", "aplay", "ffplay"):
-        found = shutil.which(backend)
+    player_item = _player_check(backend, bridge)
+    items.append(player_item)
+    if do_synth and player_item.status == OK and player_item.name.startswith("再生 (powershell"):
+        # 実際に 1 回起動してみる (--synth のときだけ。起動に 1 秒ほどかかる)
+        alive = powershell_available()
         items.append(
             CheckItem(
-                f"再生 ({backend})",
-                OK if found else FAIL,
-                found or "見つかりません",
-                f"apt install {'pulseaudio-utils' if backend == 'paplay' else backend}",
+                "PowerShell 実行",
+                OK if alive else FAIL,
+                "起動を確認しました" if alive else "起動できません",
+                "WSL interop が有効か (cat /proc/sys/fs/binfmt_misc/WSLInterop) 確認してください",
             )
         )
-    else:
-        items.append(CheckItem(f"再生 ({backend})", OK if backend == "none" else WARN, ""))
 
     # 5. 設定
     if cfg.sources:
@@ -227,11 +261,13 @@ WSL から Windows の voicepeak.exe を叩くときの要点
 
 
 def powershell_available() -> bool:
-    if shutil.which("powershell.exe") is None:
+    """実際に PowerShell を起動できるか (``check --synth`` から呼ぶ)."""
+    executable = find_powershell()
+    if executable is None:
         return False
     try:
         proc = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", "exit 0"],
+            [executable, "-NoProfile", "-Command", "exit 0"],
             capture_output=True,
             timeout=30,
             cwd="/mnt/c" if Path("/mnt/c").is_dir() else None,

@@ -29,6 +29,12 @@ from .wavutil import wav_duration
 
 log = get_logger("player")
 
+# PATH に無いときに見に行く既定のインストール先
+POWERSHELL_FALLBACKS = (
+    "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+    "/mnt/c/Program Files/PowerShell/7/pwsh.exe",
+)
+
 # 常駐プレイヤ (PowerShell)
 _PS_SCRIPT = r"""
 $ErrorActionPreference = 'Continue'
@@ -278,12 +284,34 @@ class CommandPlayer(Player):
         self._queue.put(None)
 
 
+def find_powershell() -> Optional[str]:
+    """PowerShell の実行ファイルを探す.
+
+    ``/etc/wsl.conf`` で ``appendWindowsPath=false`` にしていると PATH から
+    ``powershell.exe`` が消えるため、既定のインストール先も見に行く。
+    """
+    for name in ("powershell.exe", "pwsh.exe"):
+        found = shutil.which(name)
+        if found:
+            return found
+    for path in POWERSHELL_FALLBACKS:
+        if Path(path).is_file():
+            return path
+    return None
+
+
 def select_player(backend: str, bridge: Bridge, volume: Optional[int] = None) -> Player:
     """設定値と環境から再生バックエンドを決める."""
     if backend == "none":
         return NullPlayer()
     if backend == "powershell":
-        return PowershellPlayer(bridge)
+        found = find_powershell()
+        if found is None:
+            raise PlayerError(
+                "powershell.exe が見つかりません / "
+                "/etc/wsl.conf の [interop] appendWindowsPath=true を確認してください。"
+            )
+        return PowershellPlayer(bridge, executable=found)
     if backend in ("paplay", "aplay", "ffplay"):
         if shutil.which(backend) is None:
             raise PlayerError(f"{backend} が見つかりません")
@@ -291,7 +319,14 @@ def select_player(backend: str, bridge: Bridge, volume: Optional[int] = None) ->
 
     # auto
     if bridge.name == "wsl":
-        return PowershellPlayer(bridge)
+        found = find_powershell()
+        if found:
+            return PowershellPlayer(bridge, executable=found)
+        # 見つからないまま powershell を選ぶと、合成だけ進んで無音になる
+        log.warning(
+            "powershell.exe が見つかりません "
+            "(/etc/wsl.conf の [interop] appendWindowsPath=true を確認してください)"
+        )
     for candidate in ("paplay", "aplay", "ffplay"):
         if shutil.which(candidate):
             return CommandPlayer(candidate, volume)
