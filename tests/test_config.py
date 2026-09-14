@@ -76,6 +76,25 @@ class ConfigTest(unittest.TestCase):
         os.environ["CC_VOICEPEAK_CHAR_LIMIT"] = "100"
         self.assertEqual(load_config().get("voicepeak.char_limit"), 100)
 
+    def project_config(self, data: dict) -> Path:
+        return self.write(
+            Path(os.environ["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json", data
+        )
+
+    def test_file_numeric_string_is_coerced(self):
+        self.project_config({"voicepeak": {"speed": "120"}})
+        self.assertEqual(load_config().get("voicepeak.speed"), 120)
+
+    def test_file_non_numeric_string_raises_config_error(self):
+        self.project_config({"voicepeak": {"speed": "fast"}})
+        with self.assertRaises(ConfigError):
+            load_config()
+
+    def test_file_min_chars_string_raises_config_error(self):
+        self.project_config({"hook": {"min_chars": "x"}})
+        with self.assertRaises(ConfigError):
+            load_config()
+
     def test_broken_json_raises(self):
         path = Path(os.environ["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json"
         path.parent.mkdir(parents=True, exist_ok=True)

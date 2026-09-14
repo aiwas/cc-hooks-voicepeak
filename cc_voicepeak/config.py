@@ -196,6 +196,21 @@ def _coerce(path: tuple, value: Any) -> Any:
     return value
 
 
+def _coerce_known_keys(data: Dict[str, Any]) -> None:
+    """設定ファイル由来の値にも型変換をかける.
+
+    環境変数と CLI 引数は ``_coerce()`` を通っていたが、JSON 由来の値は
+    素通しだったため ``{"voicepeak": {"speed": "fast"}}`` が生の ValueError に
+    なっていた。ここで ``ConfigError`` に揃える。
+    """
+    for path in _INT_KEYS:
+        node: Any = data
+        for part in path[:-1]:
+            node = node.get(part) if isinstance(node, dict) else None
+        if isinstance(node, dict) and path[-1] in node:
+            node[path[-1]] = _coerce(path, node[path[-1]])
+
+
 def config_search_paths() -> List[Path]:
     """探索対象の設定ファイルを優先度の低い順に返す."""
     paths: List[Path] = []
@@ -259,6 +274,7 @@ def load_config(
                 node = node.setdefault(part, {})
             node[path_tuple[-1]] = _coerce(path_tuple, raw)
 
+    _coerce_known_keys(data)
     cfg = Config(data, used)
 
     for dotted, value in (overrides or {}).items():
