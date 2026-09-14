@@ -179,7 +179,13 @@ def _load(args: argparse.Namespace) -> Config:
 
 def _read_text(args: argparse.Namespace) -> str:
     if getattr(args, "file", None):
-        return Path(args.file).expanduser().read_text(encoding="utf-8", errors="replace")
+        path = Path(args.file).expanduser()
+        try:
+            return path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            raise CcVoicepeakError(
+                f"ファイルを読み込めません: {path} ({exc.strerror or exc})"
+            ) from exc
     if getattr(args, "stdin", False) or not getattr(args, "text", None):
         if sys.stdin is None or sys.stdin.isatty():
             return " ".join(getattr(args, "text", []) or [])
@@ -210,7 +216,8 @@ def cmd_split(args: argparse.Namespace, text: Optional[str] = None) -> int:
                 indent=2,
             )
         )
-        return 0
+        # 読み上げる内容が無いことは JSON 出力でも失敗として扱う
+        return 0 if blocks else 1
 
     if not blocks:
         print("読み上げる内容がありません", file=sys.stderr)

@@ -102,6 +102,18 @@ class SplitCommandTest(CliTestCase):
         for block in payload["blocks"]:
             self.assertLessEqual(block["width"], 30)
 
+    def test_split_json_empty_input_exits_nonzero(self):
+        proc = self.run_cli("split", "--stdin", "--json", stdin="   ")
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(json.loads(proc.stdout.decode("utf-8"))["blocks"], [])
+
+    def test_missing_file_reports_error_without_traceback(self):
+        proc = self.run_cli("split", "-f", str(self.tmp / "no-such.md"))
+        self.assertEqual(proc.returncode, 1)
+        stderr = proc.stderr.decode("utf-8")
+        self.assertIn("ファイルを読み込めません", stderr)
+        self.assertNotIn("Traceback", stderr)
+
     def test_split_text_argument(self):
         proc = self.run_cli("split", "こんにちは。", check=True)
         self.assertIn("こんにちは。", proc.stdout.decode("utf-8"))
