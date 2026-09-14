@@ -57,6 +57,12 @@ class CliTestCase(unittest.TestCase):
             )
         return proc
 
+    def write_project_config(self, data: dict) -> Path:
+        path = Path(self.env["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        return path
+
     def recorded_calls(self):
         if not self.calls.exists():
             return []
@@ -213,6 +219,28 @@ class HookCommandTest(CliTestCase):
 
             time.sleep(0.05)
         self.assertTrue(self.recorded_calls(), "別プロセスでの合成が行われていない")
+
+
+class ExitCodeTest(CliTestCase):
+    def test_hook_survives_non_cc_voicepeak_exception(self):
+        # hook.min_chars が設定ファイル由来だと int() が ValueError を送出する
+        self.write_project_config({"hook": {"min_chars": "x"}})
+        payload = {"hook_event_name": "Notification", "message": "テスト"}
+        proc = self.run_cli("hook", "--sync", stdin=json.dumps(payload))
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode())
+
+    def test_hook_survives_config_error(self):
+        self.write_project_config({"voicepeak": {"char_limit": 500}})
+        payload = {"hook_event_name": "Notification", "message": "テスト"}
+        proc = self.run_cli("hook", "--sync", stdin=json.dumps(payload))
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode())
+
+    def test_other_commands_report_failure_inside_project(self):
+        # CLAUDE_PROJECT_DIR があっても hook 以外は終了コードを握り潰さない
+        self.write_project_config({"voicepeak": {"char_limit": 500}})
+        proc = self.run_cli("speak", "テスト")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("char_limit", proc.stderr.decode("utf-8"))
 
 
 class MiscCommandTest(CliTestCase):

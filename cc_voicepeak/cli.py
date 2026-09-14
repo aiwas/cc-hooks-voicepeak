@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import signal
 import sys
 import threading
@@ -318,7 +317,11 @@ def cmd_hook(args: argparse.Namespace) -> int:
                 "on_busy": None,
             }
         )
-        return cmd_speak(speak_args, text=text)
+        code = cmd_speak(speak_args, text=text)
+        if code:
+            # hook は Claude Code を止めないので、失敗はログに残すだけにする
+            log.warning("読み上げが失敗しました (code=%d)", code)
+        return 0
 
     pid = spawn_detached(text, session_key, cfg, config_paths=args.config)
     log.info("読み上げプロセスを起動しました (pid=%d)", pid)
@@ -398,15 +401,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     handler = _COMMANDS[args.command]
+    # hook から呼ばれている場合は、読み上げの失敗で Claude Code を止めない
+    on_error = 0 if args.command == "hook" else 1
     try:
         return handler(args)
+    except KeyboardInterrupt:
+        return 130
     except CcVoicepeakError as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         log.error("%s", exc)
-        # hook から呼ばれている場合は Claude Code を止めないよう 0 を返す
-        return 0 if args.command == "hook" or os.environ.get("CLAUDE_PROJECT_DIR") else 1
-    except KeyboardInterrupt:
-        return 130
+        return on_error
+    except Exception as exc:  # noqa: BLE001 - hook を必ず 0 で終わらせるため
+        print(f"エラー: {exc}", file=sys.stderr)
+        log.exception("予期しないエラー: %s", exc)
+        return on_error
 
 
 if __name__ == "__main__":  # pragma: no cover
