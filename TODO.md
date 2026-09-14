@@ -29,17 +29,7 @@
 1 文字あたり 2 回呼ばれる。`CONJ_SUFFIXES` / `PARTICLES` を長さ降順に並べた
 モジュール定数として持ち、関数内は走査のみにする。1 と併せて対応する。
 
-### 3. ロックを取得できなくても合成を続行する — `locking.py:56`
-
-`ExeLock` はタイムアウト時に警告を出して `return self` するため、
-**voicepeak.exe が同時起動される**（同時起動不可という前提が破れる）。
-`__exit__` も保持していないロックに対して `LOCK_UN` を呼ぶ。
-
-取得成否を属性に保持し、未取得なら合成をスキップして `SynthError` にする。
-`tests/test_locking.py:131` の `test_lock_timeout_does_not_raise` は
-「例外が出ないこと」しか見ておらず、この危険な挙動を仕様として固定してしまっている。
-
-### 4. hook が終了コード 1 で落ちる経路がある — `cli.py:400`
+### 3. hook が終了コード 1 で落ちる経路がある — `cli.py:400`
 
 [確認済] `main()` は `CcVoicepeakError` しか捕捉しないため、`ValueError` / `OSError` は
 素通りしてトレースバックのまま exit 1 になる。`bin/cc-voicepeak:31` は `exec` するので
@@ -51,7 +41,7 @@
 `main()` で `KeyboardInterrupt` 以外の例外も捕捉し、`args.command == "hook"` のときは
 必ず 0 を返す。
 
-### 5. デタッチ起動でボイス指定が黙って捨てられる — `hook.py:90`
+### 4. デタッチ起動でボイス指定が黙って捨てられる — `hook.py:90`
 
 [確認済] `spawn_detached()` が組み立てるコマンドは
 `speak --stdin --session --on-busy --config` のみ。`hook` サブコマンドに定義されている
@@ -59,14 +49,14 @@
 `hook.detach` の既定は true なので、`--sync` を付けない限り常に無視される。
 `--exe` は子プロセス側で解決できなくなるため影響が大きい。
 
-### 6. 設定ファイル由来の値が型変換されない — `config.py:289`
+### 5. 設定ファイル由来の値が型変換されない — `config.py:289`
 
 `_coerce()` は環境変数と CLI override にしか適用されず、JSON 由来の値は素通し。
 `{"voicepeak":{"speed":"fast"}}` で `int(speed)` が生の `ValueError` を送出する（4 の経路）。
 `_validate()` 内の `int()` を `ConfigError` に変換するか、`_deep_merge` 後に
 `_INT_KEYS` へ `_coerce` を適用する。
 
-### 7. インラインコード内のスネークケースが壊れる — `normalize.py:184`
+### 6. インラインコード内のスネークケースが壊れる — `normalize.py:184`
 
 [確認済] 強調記号の除去がインラインコード展開より前に走るため、`_` と `*` を巻き込む。
 
@@ -80,7 +70,7 @@
 `_INLINE_CODE` を先に処理して中身をプレースホルダで保護する。加えて `_` の強調は
 前後が単語構成文字でない場合に限定する。
 
-### 8. パスでない文字列がパス扱いされ前半が消える — `normalize.py:34`
+### 7. パスでない文字列がパス扱いされ前半が消える — `normalize.py:34`
 
 [確認済] `_PATHISH` の `\w` が Unicode 対応のため、日本語や日付を巻き込む。
 
@@ -93,30 +83,24 @@
 `(?:[\w.\-]+/){1,}` の分岐を ASCII に限定し、末尾要素が既知の拡張子を持つ場合のみ
 短縮する。
 
-### 9. 閉じられていないコードフェンス以降の本文が消える — `normalize.py:95`
+### 8. 閉じられていないコードフェンス以降の本文が消える — `normalize.py:95`
 
 [確認済] `前。\n```py\ncode()\nまだ続く本文です。` → `前。\nコードブロック。`。
 フェンスの数が奇数になる出力（フェンスを含むコード例、途中で切れた応答）で発生する。
 フェンス内の行をバッファし、EOF 時点で未クローズなら本文として復帰させる。
 
-### 10. `_balance_tail()` が区切りなしで連結する — `splitter.py:386`
+### 9. `_balance_tail()` が区切りなしで連結する — `splitter.py:386`
 
 `("" if blocks[-2].endswith("\n") else "")` は両分岐とも空文字で、区切り挿入の意図が
 失われている。`split_text` が境界で `lstrip()` した空白が復元されず、
 `"word"` + `"tail"` → `"wordtail"` のように単語が繋がる。
 
-### 11. 割り込み時に作業ディレクトリが必ず残る — `synth.py:128` / `pipeline.py:208`
+### 10. 割り込み時に作業ディレクトリが必ず残る — `synth.py:128` / `pipeline.py:208`
 
 `work_dir = <temp>/run/<pid>` の削除は `pipeline.speak` の `finally` にしかない。
 既定の `on_busy=replace` では対象プロセスが SIGKILL されるため実行されず、
 Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 起動時に古い `run/*` を掃除する処理は存在しない。
-
-### 12. stale / 再利用された PID のプロセスグループを killpg する — `locking.py:157`
-
-生存判定が `os.kill(pid, 0)` のみ。PID 再利用時に無関係なプロセス群を停止させ得る。
-状態ファイルに `/proc/<pid>/stat` の starttime か cmdline の照合値を記録し、
-一致した場合のみ kill する。
 
 ---
 
@@ -151,13 +135,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 - **`synth.py:181`** リトライ戦略が粗い。`retries=3` で同じ fallback モードを
   バックオフなしで 3 連続試行し、元のモードは再試行されない。一過性の失敗と
   文字数超過のような恒久的失敗も区別していない
-- **`locking.py:118`** 状態ファイルの一時名 `speech-<key>.tmp` を同一セッションキーの
-  全プロセスが共有し、`update()` は `write_text` で直接上書きする。書きかけを読むと
-  `read()` が `None` を返し「スロット空き」と誤認される
-- **`locking.py:80`** taskkill の returncode を検査せず、`interrupt()` は無条件に
-  `killed = True` にする
-- **`cli.py:216`** busy 判定と `slot.write()` の間に TOCTOU があり、
-  `wait_until_free()` が False を返してもそのまま進むため読み上げが重なる
 
 ### 設定・CLI
 
@@ -218,10 +195,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
   手動で `cc-voicepeak hook` を叩くと固まる
 - **`hook.py:118`** 分離プロセスへの stdin 書き込みがパイプバッファ（通常 64KB）超で
   ブロックし得る。`install-hook` が案内する `timeout: 10` を超過する可能性がある
-- **`locking.py:31`** ランタイムディレクトリのパーミッションが umask 任せ。
-  `XDG_RUNTIME_DIR` 未設定時は `/tmp/cc-voicepeak` になり、状態ファイル（読み上げテキスト
-  先頭 80 文字を含む）が他ユーザから読める。`mkdir(mode=0o700)` を明示する
-- **`cli.py:247`** 上記の状態ファイルに本文が平文で残る。長さだけに落とすか `0o600` を
 - **`synth.py:128`** `work_dir` が PID のみで一意化されており、PID 再利用で衝突する
 - **`synth.py:129`** 一時領域が `/mnt/c/Windows/Temp` になった場合、`cache/<sha1>.wav` が
   予測可能な名前で他ユーザから書き換え可能な場所に置かれる
@@ -292,7 +265,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
   `notification_prefix` の付加、`subagent` + `SubagentStop`、`detach: false`
 - **デタッチ子プロセスへのオプション伝播** — `test_cli.py:199` は「子が合成したか」しか
   見ておらず、高 5 を検出できない。`hook -n <名前>` で narrator を検証するテストが有効
-- **`on_busy` の 3 分岐**（`cli.py:213`）— `test_locking.py` は `SpeechSlot` 単体のみ
 - **設定優先順位** — `CC_VOICEPEAK_CONFIG`、`--config`、cwd フォールバックが未検証
 - **バリデーション** — `test_config.py:86` は char_limit / speed / player のみ。
   `pitch`・`on_busy`・`input_mode`・`min_fill`・トップレベルが dict でない JSON・
@@ -301,8 +273,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
   `speak --concat`、`--log-level`/`-v`
 - **`bridge.py`** — `temp_root()` の候補選択、`_query_windows_env`、wintemp キャッシュの
   読み書き、`find_voicepeak` の Users/AppData 分岐（`Public`/`Default` 除外）
-- **`locking.py`** — `update()`、`clear()` の他プロセス判定、taskkill 失敗時、
-  `wait_until_free` が True を返す経路
 - **`normalize.py`** — `code_blocks="read"`、`inline_code="drop"`、未クローズフェンス、
   空文字入力、Windows パス、入れ子引用、区切りマークの無い `max_total_chars` 切り詰め
 - **`splitter.py`** — `limit<=0` の `ValueError`、`drop_empty=False`、`\r\n` 入力、
