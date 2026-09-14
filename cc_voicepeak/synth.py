@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from .bridge import Bridge
-from .errors import SynthError
+from .errors import LockTimeout, SynthError
 from .locking import ExeLock
 from .logging_util import get_logger
 
@@ -191,6 +191,11 @@ class Synthesizer:
         for attempt, mode in enumerate(modes):
             try:
                 command = self._run(prepared, target, mode)
+            except LockTimeout as exc:
+                # 再試行しても待ち時間が伸びるだけなので諦める
+                last_error = str(exc)
+                log.warning("合成に失敗 #%d: %s", index, exc)
+                break
             except SynthError as exc:
                 last_error = str(exc)
                 log.warning(
