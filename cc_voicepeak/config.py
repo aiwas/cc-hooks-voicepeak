@@ -4,10 +4,15 @@
 
 1. 組み込みデフォルト
 2. ``~/.config/cc-voicepeak/config.json`` (XDG_CONFIG_HOME 対応)
-3. プロジェクト内 ``.claude/voicepeak.json`` (CLAUDE_PROJECT_DIR / cwd から探索)
+3. プロジェクト内 ``.claude/voicepeak.json``
+   (``CLAUDE_PROJECT_DIR`` があればそこ、無ければ cwd)
 4. 環境変数 ``CC_VOICEPEAK_CONFIG`` が指すファイル
 5. 環境変数による個別上書き (``CC_VOICEPEAK_*``)
-6. コマンドライン引数
+6. ``--config`` で指定したファイル
+7. コマンドライン引数
+
+4 までがファイル、5 以降がその場の指定。``--config`` はコマンドライン引数なので
+環境変数より後に重ねる。
 """
 
 from __future__ import annotations
@@ -219,15 +224,11 @@ def config_search_paths() -> List[Path]:
     config_home = Path(xdg) if xdg else Path.home() / ".config"
     paths.append(config_home / "cc-voicepeak" / "config.json")
 
+    # CLAUDE_PROJECT_DIR があるときは cwd を足さない。
+    # 足すと cwd 側が後勝ちになり、プロジェクト設定を意図せず上書きしてしまう。
     project = os.environ.get("CLAUDE_PROJECT_DIR")
-    roots: List[Path] = []
-    if project:
-        roots.append(Path(project))
-    roots.append(Path.cwd())
-    for root in roots:
-        candidate = root / ".claude" / "voicepeak.json"
-        if candidate not in paths:
-            paths.append(candidate)
+    root = Path(project) if project else Path.cwd()
+    paths.append(root / ".claude" / "voicepeak.json")
 
     explicit = os.environ.get("CC_VOICEPEAK_CONFIG")
     if explicit:
@@ -236,20 +237,9 @@ def config_search_paths() -> List[Path]:
     return paths
 
 
-def load_config(
-    extra_paths: Optional[List[Path]] = None,
-    overrides: Optional[Dict[str, Any]] = None,
-    use_env: bool = True,
-) -> Config:
-    """設定を読み込んで :class:`Config` を返す."""
-    data = copy.deepcopy(DEFAULTS)
-    used: List[Path] = []
-
-    candidates = config_search_paths()
-    if extra_paths:
-        candidates.extend(Path(p).expanduser() for p in extra_paths)
-
-    for path in candidates:
+def _merge_files(data: Dict[str, Any], paths: List[Path], used: List[Path]) -> None:
+    """設定ファイルを順に読み込んで ``data`` へ重ねる."""
+    for path in paths:
         try:
             if not path.is_file():
                 continue
@@ -264,6 +254,18 @@ def load_config(
         _deep_merge(data, loaded)
         used.append(path)
 
+
+def load_config(
+    extra_paths: Optional[List[Path]] = None,
+    overrides: Optional[Dict[str, Any]] = None,
+    use_env: bool = True,
+) -> Config:
+    """設定を読み込んで :class:`Config` を返す."""
+    data = copy.deepcopy(DEFAULTS)
+    used: List[Path] = []
+
+    _merge_files(data, config_search_paths(), used)
+
     if use_env:
         for env_name, path_tuple in _ENV_MAP.items():
             raw = os.environ.get(env_name)
@@ -273,6 +275,10 @@ def load_config(
             for part in path_tuple[:-1]:
                 node = node.setdefault(part, {})
             node[path_tuple[-1]] = _coerce(path_tuple, raw)
+
+    # --config はコマンドライン引数なので、環境変数より後に重ねる
+    if extra_paths:
+        _merge_files(data, [Path(p).expanduser() for p in extra_paths], used)
 
     _coerce_known_keys(data)
     cfg = Config(data, used)

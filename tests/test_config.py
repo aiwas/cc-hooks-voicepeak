@@ -67,6 +67,43 @@ class ConfigTest(unittest.TestCase):
         os.environ["CC_VOICEPEAK_NARRATOR"] = "環境変数"
         self.assertEqual(load_config().get("voicepeak.narrator"), "環境変数")
 
+    def test_explicit_config_beats_env(self):
+        # --config はコマンドライン引数なので環境変数より優先する
+        extra = self.write(self.tmp / "extra.json", {"voicepeak": {"narrator": "--config"}})
+        os.environ["CC_VOICEPEAK_NARRATOR"] = "環境変数"
+        cfg = load_config(extra_paths=[extra])
+        self.assertEqual(cfg.get("voicepeak.narrator"), "--config")
+
+    def test_env_config_file_loses_to_env_variable(self):
+        # CC_VOICEPEAK_CONFIG はファイルなので環境変数の個別指定に負ける
+        path = self.write(self.tmp / "env.json", {"voicepeak": {"narrator": "ファイル"}})
+        os.environ["CC_VOICEPEAK_CONFIG"] = str(path)
+        os.environ["CC_VOICEPEAK_NARRATOR"] = "環境変数"
+        self.assertEqual(load_config().get("voicepeak.narrator"), "環境変数")
+
+    def in_cwd(self, data: dict) -> Path:
+        """cwd を一時ディレクトリへ移し、そこに .claude/voicepeak.json を置く."""
+        cwd = self.tmp / "work"
+        path = self.write(cwd / ".claude" / "voicepeak.json", data)
+        previous = Path.cwd()
+        os.chdir(cwd)
+        self.addCleanup(os.chdir, previous)
+        return path
+
+    def test_cwd_is_not_searched_when_project_dir_is_set(self):
+        # cwd 側を後から重ねると、プロジェクト設定を意図せず上書きしてしまう
+        self.in_cwd({"voicepeak": {"narrator": "cwd"}})
+        self.write(
+            Path(os.environ["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json",
+            {"voicepeak": {"narrator": "プロジェクト"}},
+        )
+        self.assertEqual(load_config().get("voicepeak.narrator"), "プロジェクト")
+
+    def test_cwd_is_searched_without_project_dir(self):
+        del os.environ["CLAUDE_PROJECT_DIR"]
+        self.in_cwd({"voicepeak": {"narrator": "cwd"}})
+        self.assertEqual(load_config().get("voicepeak.narrator"), "cwd")
+
     def test_cli_overrides_win(self):
         os.environ["CC_VOICEPEAK_NARRATOR"] = "環境変数"
         cfg = load_config(overrides={"voicepeak.narrator": "コマンドライン"})
