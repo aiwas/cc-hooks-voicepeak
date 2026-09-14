@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -71,6 +72,16 @@ class CliTestCase(unittest.TestCase):
             for line in self.calls.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
+
+    def wait_for_calls(self, count: int = 1, timeout: float = 20.0):
+        """デタッチした読み上げプロセスが合成を終えるまで待つ."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            calls = self.recorded_calls()
+            if len(calls) >= count:
+                return calls
+            time.sleep(0.05)
+        return self.recorded_calls()
 
 
 class SplitCommandTest(CliTestCase):
@@ -211,14 +222,46 @@ class HookCommandTest(CliTestCase):
         }
         proc = self.run_cli("hook", stdin=json.dumps(payload), check=True)
         self.assertEqual(proc.stdout.decode().strip(), "")
-        # 子プロセスが読み上げを終えるのを待つ
-        for _ in range(200):
-            if self.recorded_calls():
-                break
-            import time
+        self.assertTrue(self.wait_for_calls(), "別プロセスでの合成が行われていない")
 
-            time.sleep(0.05)
-        self.assertTrue(self.recorded_calls(), "別プロセスでの合成が行われていない")
+    def test_detached_hook_passes_voice_options(self):
+        path = self.transcript("声の指定を引き継ぐか確認します。")
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": "voice-test",
+            "transcript_path": str(path),
+        }
+        self.run_cli(
+            "hook",
+            "-n",
+            "Fake Narrator B",
+            "--speed",
+            "120",
+            stdin=json.dumps(payload),
+            check=True,
+        )
+        calls = self.wait_for_calls()
+        self.assertTrue(calls, "別プロセスでの合成が行われていない")
+        self.assertEqual(calls[0]["narrator"], "Fake Narrator B")
+        self.assertEqual(calls[0]["speed"], "120")
+
+    def test_detached_hook_passes_config_option(self):
+        extra = self.tmp / "extra.json"
+        extra.write_text(
+            json.dumps({"voicepeak": {"narrator": "Fake Narrator B"}}), encoding="utf-8"
+        )
+        path = self.transcript("設定ファイルの引き継ぎを確認します。")
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": "config-test",
+            "transcript_path": str(path),
+        }
+        self.run_cli(
+            "--config", str(extra), "hook", stdin=json.dumps(payload), check=True
+        )
+        calls = self.wait_for_calls()
+        self.assertTrue(calls, "別プロセスでの合成が行われていない")
+        self.assertEqual(calls[0]["narrator"], "Fake Narrator B")
 
 
 class ExitCodeTest(CliTestCase):

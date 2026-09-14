@@ -15,7 +15,7 @@ import signal
 import sys
 import threading
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from . import __version__
 from .bridge import detect_bridge
@@ -136,6 +136,33 @@ def _overrides(args: argparse.Namespace) -> dict:
     if getattr(args, "no_cache", False):
         mapping["voicepeak.cache"] = False
     return {key: value for key, value in mapping.items() if value is not None}
+
+
+_VOICE_FLAGS = (
+    ("--narrator", "narrator"),
+    ("--emotion", "emotion"),
+    ("--speed", "speed"),
+    ("--pitch", "pitch"),
+    ("--exe", "exe"),
+)
+
+
+def _detach_options(args: argparse.Namespace) -> Tuple[List[str], List[str]]:
+    """デタッチした読み上げプロセスへ引き継ぐ (グローバル引数, speak 引数)."""
+    global_options: List[str] = []
+    for path in getattr(args, "config", None) or []:
+        global_options += ["--config", str(path)]
+    if getattr(args, "verbose", False):
+        global_options.append("--verbose")
+    if getattr(args, "log_level", None):
+        global_options += ["--log-level", str(args.log_level)]
+
+    speak_options: List[str] = []
+    for flag, name in _VOICE_FLAGS:
+        value = getattr(args, name, None)
+        if value is not None:
+            speak_options += [flag, str(value)]
+    return global_options, speak_options
 
 
 def _load(args: argparse.Namespace) -> Config:
@@ -323,7 +350,14 @@ def cmd_hook(args: argparse.Namespace) -> int:
             log.warning("読み上げが失敗しました (code=%d)", code)
         return 0
 
-    pid = spawn_detached(text, session_key, cfg, config_paths=args.config)
+    global_options, speak_options = _detach_options(args)
+    pid = spawn_detached(
+        text,
+        session_key,
+        cfg,
+        global_options=global_options,
+        speak_options=speak_options,
+    )
     log.info("読み上げプロセスを起動しました (pid=%d)", pid)
     return 0
 

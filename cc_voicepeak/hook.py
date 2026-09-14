@@ -18,7 +18,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 from .config import Config
 from .logging_util import get_logger
@@ -85,12 +85,22 @@ def decorate(text: str, cfg: Config) -> str:
     return f"{prefix}{text}{suffix}"
 
 
-def spawn_detached(text: str, session_key: str, cfg: Config, config_paths=None) -> int:
-    """読み上げ本体を別プロセスとして起動し、その pid を返す."""
-    command = [
-        sys.executable,
-        "-m",
-        "cc_voicepeak",
+def spawn_detached(
+    text: str,
+    session_key: str,
+    cfg: Config,
+    global_options: Optional[Sequence[str]] = None,
+    speak_options: Optional[Sequence[str]] = None,
+) -> int:
+    """読み上げ本体を別プロセスとして起動し、その pid を返す.
+
+    ``--config`` や ``-v`` は ``cc-voicepeak`` 直下のオプションなので、
+    サブコマンド名より後ろに置くと argparse が受け付けない。声の指定
+    (``-n`` など) は逆に ``speak`` 側のオプションなので後ろに置く。
+    """
+    command = [sys.executable, "-m", "cc_voicepeak"]
+    command += [str(option) for option in global_options or []]
+    command += [
         "speak",
         "--stdin",
         "--session",
@@ -98,8 +108,7 @@ def spawn_detached(text: str, session_key: str, cfg: Config, config_paths=None) 
         "--on-busy",
         str(cfg.get("hook.on_busy", "replace")),
     ]
-    for path in config_paths or []:
-        command += ["--config", str(path)]
+    command += [str(option) for option in speak_options or []]
 
     env = dict(os.environ)
     env[DETACH_ENV] = "1"
