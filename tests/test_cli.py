@@ -58,6 +58,22 @@ class CliTestCase(unittest.TestCase):
             )
         return proc
 
+    def transcript(self, text: str) -> Path:
+        path = self.tmp / "transcript.jsonl"
+        entries = [
+            {"type": "user", "message": {"role": "user", "content": "やって"}},
+            {
+                "type": "assistant",
+                "isSidechain": False,
+                "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
+            },
+        ]
+        path.write_text(
+            NL.join(json.dumps(entry, ensure_ascii=False) for entry in entries),
+            encoding="utf-8",
+        )
+        return path
+
     def write_project_config(self, data: dict) -> Path:
         path = Path(self.env["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,22 +162,6 @@ class SpeakCommandTest(CliTestCase):
 
 
 class HookCommandTest(CliTestCase):
-    def transcript(self, text: str) -> Path:
-        path = self.tmp / "transcript.jsonl"
-        entries = [
-            {"type": "user", "message": {"role": "user", "content": "やって"}},
-            {
-                "type": "assistant",
-                "isSidechain": False,
-                "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
-            },
-        ]
-        path.write_text(
-            NL.join(json.dumps(entry, ensure_ascii=False) for entry in entries),
-            encoding="utf-8",
-        )
-        return path
-
     def test_stop_event_reads_last_assistant_message(self):
         path = self.transcript("## 完了" + NL + NL + "テストは全部で二十三件、すべて成功しました。")
         payload = {
@@ -276,6 +276,50 @@ class HookCommandTest(CliTestCase):
         self.assertEqual(calls[0]["narrator"], "Fake Narrator B")
 
 
+class HookConfigTest(CliTestCase):
+    def test_min_chars_skips_short_text(self):
+        self.write_project_config({"hook": {"min_chars": 20}})
+        payload = {"hook_event_name": "Notification", "message": "短い"}
+        self.run_cli("hook", "--sync", stdin=json.dumps(payload), check=True)
+        self.assertEqual(self.recorded_calls(), [])
+
+    def test_prefix_and_suffix_are_added(self):
+        self.write_project_config({"hook": {"prefix": "まもなく、", "suffix": "以上です。"}})
+        path = self.transcript("処理が完了しました。")
+        payload = {"hook_event_name": "Stop", "transcript_path": str(path)}
+        self.run_cli("hook", "--sync", stdin=json.dumps(payload), check=True)
+        spoken = "".join(call["text"] for call in self.recorded_calls())
+        self.assertTrue(spoken.startswith("まもなく、"), spoken)
+        self.assertTrue(spoken.endswith("以上です。"), spoken)
+
+    def test_notification_prefix_is_added(self):
+        self.write_project_config({"hook": {"notification_prefix": "お知らせ。"}})
+        payload = {"hook_event_name": "Notification", "message": "許可が必要です"}
+        self.run_cli("hook", "--sync", stdin=json.dumps(payload), check=True)
+        self.assertTrue(self.recorded_calls()[0]["text"].startswith("お知らせ。"))
+
+    def test_subagent_stop_is_skipped_by_default(self):
+        path = self.transcript("サブエージェントの結果です。")
+        payload = {"hook_event_name": "SubagentStop", "transcript_path": str(path)}
+        self.run_cli("hook", "--sync", stdin=json.dumps(payload), check=True)
+        self.assertEqual(self.recorded_calls(), [])
+
+    def test_subagent_stop_is_read_when_enabled(self):
+        self.write_project_config({"hook": {"subagent": True}})
+        path = self.transcript("サブエージェントの結果です。")
+        payload = {"hook_event_name": "SubagentStop", "transcript_path": str(path)}
+        self.run_cli("hook", "--sync", stdin=json.dumps(payload), check=True)
+        self.assertTrue(self.recorded_calls())
+
+    def test_detach_false_speaks_before_returning(self):
+        self.write_project_config({"hook": {"detach": False}})
+        path = self.transcript("同期で読み上げます。")
+        payload = {"hook_event_name": "Stop", "transcript_path": str(path)}
+        # --sync を付けなくても hook.detach が false なら待つ
+        self.run_cli("hook", stdin=json.dumps(payload), check=True)
+        self.assertTrue(self.recorded_calls())
+
+
 class ExitCodeTest(CliTestCase):
     def test_hook_survives_non_cc_voicepeak_exception(self):
         # hook.min_chars が設定ファイル由来だと int() が ValueError を送出する
@@ -331,6 +375,19 @@ class MiscCommandTest(CliTestCase):
     def test_narrators_uses_exe(self):
         proc = self.run_cli("narrators", check=True)
         self.assertIn("Fake Narrator A", proc.stdout.decode("utf-8"))
+
+    def test_emotions_uses_exe(self):
+        proc = self.run_cli("emotions", "Fake Narrator A", check=True)
+        self.assertIn("happy", proc.stdout.decode("utf-8"))
+
+    def test_check_synth_runs_synthesis(self):
+        proc = self.run_cli("check", "--synth")
+        self.assertIn("合成テスト", proc.stdout.decode("utf-8"))
+        self.assertTrue(self.recorded_calls())
+
+    def test_verbose_reports_summary(self):
+        proc = self.run_cli("-v", "speak", "--stdin", stdin="進捗の確認です。", check=True)
+        self.assertIn("ブロック", proc.stderr.decode("utf-8"))
 
     def test_check_reports_items(self):
         proc = self.run_cli("check")
