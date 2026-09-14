@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (134 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (159 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -240,18 +240,17 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
   イベントだけを処理する
 - `Stop` は `transcript_path` の末尾からアシスタント応答を拾う（`transcript.py`）
 - 読み上げ本体は `setsid` 済みの別プロセスへ渡して即 `exit 0`（`hook.spawn_detached()`）。
-  子プロセス側は `CC_VOICEPEAK_DETACHED` が立った状態で動く
+  子プロセス側は `CC_VOICEPEAK_DETACHED` が立った状態で動く。
+  `--config` / `-v` / `--log-level` は `cc-voicepeak` 直下のオプションなので
+  サブコマンド名の **前**、`-n` などの声の指定は `speak` のオプションなので **後ろ**に
+  並べる（順序を間違えると argparse が `unrecognized arguments` で終了する）
 - セッションごとの状態は `SpeechSlot`（ランタイムディレクトリの JSON）に持ち、
   `hook.on_busy` に応じて `replace`（前を taskkill して割り込む）/ `queue`（待つ）/
   `skip`（捨てる）を切り替える
 - **読み上げの失敗で Claude Code の作業を止めない。** `cli.main()` は
-  `CcVoicepeakError` を捕まえて、`hook` サブコマンドのとき（および
-  `CLAUDE_PROJECT_DIR` が設定されているとき）は 0 を返す
-
-  ただし現状は完全ではない。`CcVoicepeakError` を継承しない例外（`OSError` など）は
-  そのまま伝播して非 0 終了になり、`--sync` 指定時は `cmd_speak()` の戻り値がそのまま
-  返る。`CLAUDE_PROJECT_DIR` による 0 化は全サブコマンドに適用されるため、
-  プロジェクト内で `speak` が失敗しても 0 になる点にも注意
+  `KeyboardInterrupt` 以外のすべての例外を捕まえ、`hook` サブコマンドのときは 0 を返す。
+  `--sync` / `hook.detach: false` の経路も、`cmd_speak()` が非 0 を返したら警告ログに
+  落として 0 で終わる。`hook` 以外のサブコマンドは通常どおり 1 を返す
 
 ## 設定の仕組み
 

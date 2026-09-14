@@ -11,12 +11,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import signal
 import sys
 import threading
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from . import __version__
 from .bridge import detect_bridge
@@ -110,6 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="Stop,Notification",
         help="対象イベント (カンマ区切り, 既定 Stop,Notification)",
     )
+    settings_cmd.add_argument(
+        "--installed",
+        action="store_true",
+        help="PATH 上の cc-voicepeak を呼ぶ形で出力する (pip install 済みの場合)",
+    )
+    settings_cmd.add_argument("--command", dest="hook_command", help="呼び出すコマンドを直接指定")
 
     return parser
 
@@ -139,6 +144,33 @@ def _overrides(args: argparse.Namespace) -> dict:
     return {key: value for key, value in mapping.items() if value is not None}
 
 
+_VOICE_FLAGS = (
+    ("--narrator", "narrator"),
+    ("--emotion", "emotion"),
+    ("--speed", "speed"),
+    ("--pitch", "pitch"),
+    ("--exe", "exe"),
+)
+
+
+def _detach_options(args: argparse.Namespace) -> Tuple[List[str], List[str]]:
+    """デタッチした読み上げプロセスへ引き継ぐ (グローバル引数, speak 引数)."""
+    global_options: List[str] = []
+    for path in getattr(args, "config", None) or []:
+        global_options += ["--config", str(path)]
+    if getattr(args, "verbose", False):
+        global_options.append("--verbose")
+    if getattr(args, "log_level", None):
+        global_options += ["--log-level", str(args.log_level)]
+
+    speak_options: List[str] = []
+    for flag, name in _VOICE_FLAGS:
+        value = getattr(args, name, None)
+        if value is not None:
+            speak_options += [flag, str(value)]
+    return global_options, speak_options
+
+
 def _load(args: argparse.Namespace) -> Config:
     paths = [Path(path) for path in (args.config or [])]
     cfg = load_config(extra_paths=paths, overrides=_overrides(args))
@@ -153,7 +185,13 @@ def _load(args: argparse.Namespace) -> Config:
 
 def _read_text(args: argparse.Namespace) -> str:
     if getattr(args, "file", None):
-        return Path(args.file).expanduser().read_text(encoding="utf-8", errors="replace")
+        path = Path(args.file).expanduser()
+        try:
+            return path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            raise CcVoicepeakError(
+                f"ファイルを読み込めません: {path} ({exc.strerror or exc})"
+            ) from exc
     if getattr(args, "stdin", False) or not getattr(args, "text", None):
         if sys.stdin is None or sys.stdin.isatty():
             return " ".join(getattr(args, "text", []) or [])
@@ -184,7 +222,8 @@ def cmd_split(args: argparse.Namespace, text: Optional[str] = None) -> int:
                 indent=2,
             )
         )
-        return 0
+        # 読み上げる内容が無いことは JSON 出力でも失敗として扱う
+        return 0 if blocks else 1
 
     if not blocks:
         print("読み上げる内容がありません", file=sys.stderr)
@@ -318,9 +357,20 @@ def cmd_hook(args: argparse.Namespace) -> int:
                 "on_busy": None,
             }
         )
-        return cmd_speak(speak_args, text=text)
+        code = cmd_speak(speak_args, text=text)
+        if code:
+            # hook は Claude Code を止めないので、失敗はログに残すだけにする
+            log.warning("読み上げが失敗しました (code=%d)", code)
+        return 0
 
-    pid = spawn_detached(text, session_key, cfg, config_paths=args.config)
+    global_options, speak_options = _detach_options(args)
+    pid = spawn_detached(
+        text,
+        session_key,
+        cfg,
+        global_options=global_options,
+        speak_options=speak_options,
+    )
     log.info("読み上げプロセスを起動しました (pid=%d)", pid)
     return 0
 
@@ -366,9 +416,24 @@ def cmd_emotions(args: argparse.Namespace) -> int:
     return 0
 
 
+def _hook_command(args: argparse.Namespace) -> str:
+    """settings.json に書き込む hook のコマンド行を決める."""
+    if args.hook_command:
+        return str(args.hook_command)
+    if args.installed:
+        return "cc-voicepeak hook"
+    launcher = Path(__file__).resolve().parent.parent / "bin" / "cc-voicepeak"
+    if not launcher.is_file():
+        # pip install 経由ではランチャが無いので console script を呼ぶ
+        return "cc-voicepeak hook"
+    return "$CLAUDE_PROJECT_DIR/bin/cc-voicepeak hook"
+
+
 def cmd_install_hook(args: argparse.Namespace) -> int:
     events = [event.strip() for event in args.events.split(",") if event.strip()]
-    command = "$CLAUDE_PROJECT_DIR/bin/cc-voicepeak hook"
+    if not events:
+        raise CcVoicepeakError("--events に少なくとも 1 つイベントを指定してください")
+    command = _hook_command(args)
     snippet = {
         "hooks": {
             event: [{"hooks": [{"type": "command", "command": command, "timeout": 10}]}]
@@ -398,15 +463,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     handler = _COMMANDS[args.command]
+    # hook から呼ばれている場合は、読み上げの失敗で Claude Code を止めない
+    on_error = 0 if args.command == "hook" else 1
     try:
         return handler(args)
+    except KeyboardInterrupt:
+        return 130
     except CcVoicepeakError as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         log.error("%s", exc)
-        # hook から呼ばれている場合は Claude Code を止めないよう 0 を返す
-        return 0 if args.command == "hook" or os.environ.get("CLAUDE_PROJECT_DIR") else 1
-    except KeyboardInterrupt:
-        return 130
+        return on_error
+    except Exception as exc:  # noqa: BLE001 - hook を必ず 0 で終わらせるため
+        print(f"エラー: {exc}", file=sys.stderr)
+        log.exception("予期しないエラー: %s", exc)
+        return on_error
 
 
 if __name__ == "__main__":  # pragma: no cover
