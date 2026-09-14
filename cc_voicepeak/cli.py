@@ -109,6 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="Stop,Notification",
         help="対象イベント (カンマ区切り, 既定 Stop,Notification)",
     )
+    settings_cmd.add_argument(
+        "--installed",
+        action="store_true",
+        help="PATH 上の cc-voicepeak を呼ぶ形で出力する (pip install 済みの場合)",
+    )
+    settings_cmd.add_argument("--command", dest="hook_command", help="呼び出すコマンドを直接指定")
 
     return parser
 
@@ -410,9 +416,24 @@ def cmd_emotions(args: argparse.Namespace) -> int:
     return 0
 
 
+def _hook_command(args: argparse.Namespace) -> str:
+    """settings.json に書き込む hook のコマンド行を決める."""
+    if args.hook_command:
+        return str(args.hook_command)
+    if args.installed:
+        return "cc-voicepeak hook"
+    launcher = Path(__file__).resolve().parent.parent / "bin" / "cc-voicepeak"
+    if not launcher.is_file():
+        # pip install 経由ではランチャが無いので console script を呼ぶ
+        return "cc-voicepeak hook"
+    return "$CLAUDE_PROJECT_DIR/bin/cc-voicepeak hook"
+
+
 def cmd_install_hook(args: argparse.Namespace) -> int:
     events = [event.strip() for event in args.events.split(",") if event.strip()]
-    command = "$CLAUDE_PROJECT_DIR/bin/cc-voicepeak hook"
+    if not events:
+        raise CcVoicepeakError("--events に少なくとも 1 つイベントを指定してください")
+    command = _hook_command(args)
     snippet = {
         "hooks": {
             event: [{"hooks": [{"type": "command", "command": command, "timeout": 10}]}]

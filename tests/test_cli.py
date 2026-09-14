@@ -308,6 +308,26 @@ class MiscCommandTest(CliTestCase):
         self.assertEqual(entry["type"], "command")
         self.assertIn("cc-voicepeak", entry["command"])
 
+    def test_install_hook_installed_form(self):
+        proc = self.run_cli("install-hook", "--installed", check=True)
+        payload = json.loads(proc.stdout.decode("utf-8"))
+        entry = payload["hooks"]["Stop"][0]["hooks"][0]
+        self.assertEqual(entry["command"], "cc-voicepeak hook")
+
+    def test_install_hook_custom_command_and_events(self):
+        proc = self.run_cli(
+            "install-hook", "--command", "/opt/x/cc-voicepeak hook", "--events", "Stop", check=True
+        )
+        payload = json.loads(proc.stdout.decode("utf-8"))
+        self.assertEqual(list(payload["hooks"]), ["Stop"])
+        self.assertEqual(
+            payload["hooks"]["Stop"][0]["hooks"][0]["command"], "/opt/x/cc-voicepeak hook"
+        )
+
+    def test_install_hook_rejects_empty_events(self):
+        proc = self.run_cli("install-hook", "--events", " , ")
+        self.assertEqual(proc.returncode, 1)
+
     def test_narrators_uses_exe(self):
         proc = self.run_cli("narrators", check=True)
         self.assertIn("Fake Narrator A", proc.stdout.decode("utf-8"))

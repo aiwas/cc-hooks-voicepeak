@@ -65,7 +65,13 @@ export CC_VOICEPEAK_EXE='/mnt/c/Program Files/VOICEPEAK/voicepeak.exe'
 ```bash
 ./bin/cc-voicepeak install-hook                    # settings.json 用のスニペットを表示
 ./bin/cc-voicepeak install-hook --events Stop      # イベントを絞る
+cc-voicepeak install-hook --installed              # PATH 上の cc-voicepeak を呼ぶ形で出力
+cc-voicepeak install-hook --command '/opt/x/cc-voicepeak hook'   # コマンドを直接指定
 ```
+
+既定では `$CLAUDE_PROJECT_DIR/bin/cc-voicepeak hook` を出力する。
+`pip install` 経由でランチャ (`bin/cc-voicepeak`) が無い場合は、自動的に
+`cc-voicepeak hook` の形に切り替わる。
 
 スニペット本体は標準出力、案内文は標準エラーに出るので、`> snippet.json` でそのまま保存できる。  
 表示された内容を `.claude/settings.json`（プロジェクト単位）か `~/.claude/settings.json`（全体）にマージする。
