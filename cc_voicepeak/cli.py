@@ -208,23 +208,28 @@ def cmd_speak(args: argparse.Namespace, text: Optional[str] = None) -> int:
     if getattr(args, "dry_run", False):
         return cmd_split(argparse.Namespace(**{**vars(args), "json": False}), text=text)
 
-    slot = SpeechSlot(args.session)
-    policy = str(cfg.get("hook.on_busy", "replace"))
-    if slot.busy():
-        if policy == "skip":
-            log.info("すでに読み上げ中なのでスキップします")
-            return 0
-        if policy == "queue":
-            slot.wait_until_free()
-        else:
-            slot.interrupt()
-
     out_path = Path(args.out).expanduser() if args.out else None
     if out_path is not None:
+        # ファイルに書くだけなので再生スロットは使わない
         report = synth_to_file(text, cfg, out_path)
         print(f"{report.output} ({report.summary()})")
         return 0 if report.output else 1
 
+    slot = SpeechSlot(args.session)
+    policy = str(cfg.get("hook.on_busy", "replace"))
+    if not slot.acquire(policy, chars=len(text)):
+        log.info("読み上げ中のためスキップしました (on_busy=%s)", policy)
+        return 0
+
+    try:
+        return _speak_with_player(args, cfg, text, slot)
+    finally:
+        slot.clear()
+
+
+def _speak_with_player(
+    args: argparse.Namespace, cfg: Config, text: str, slot: SpeechSlot
+) -> int:
     bridge = detect_bridge()
     from .player import select_player
 
@@ -244,7 +249,6 @@ def cmd_speak(args: argparse.Namespace, text: Optional[str] = None) -> int:
         except (ValueError, OSError):
             pass
 
-    slot.write(win_pid=None, text=text[:80])
     try:
         player.start()
     except CcVoicepeakError as exc:
@@ -258,17 +262,14 @@ def cmd_speak(args: argparse.Namespace, text: Optional[str] = None) -> int:
             mark = "ok" if result.ok else f"NG ({result.error})"
             print(f"[{result.index}/{total}] {mark} {state}", file=sys.stderr)
 
-    try:
-        report = speak(
-            text,
-            cfg,
-            bridge=bridge,
-            player=player,
-            on_progress=progress,
-            should_cancel=cancelled.is_set,
-        )
-    finally:
-        slot.clear()
+    report = speak(
+        text,
+        cfg,
+        bridge=bridge,
+        player=player,
+        on_progress=progress,
+        should_cancel=cancelled.is_set,
+    )
 
     if args.verbose:
         print(report.summary(), file=sys.stderr)
