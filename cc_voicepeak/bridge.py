@@ -25,11 +25,21 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterator, Optional
 
 from .errors import BridgeError
+from .logging_util import get_logger
+
+log = get_logger("bridge")
 
 _MNT_RE = re.compile(r"^/mnt/([a-zA-Z])(/.*)?$")
+
+# テストから差し替えられるように定数にしておく
+BINFMT_MISC_DIR = Path("/proc/sys/fs/binfmt_misc")
+WIN_DRIVE_ROOTS = ("/mnt/c", "/mnt/d", "/mnt/e")
+WIN_USERS_DIR = "/mnt/c/Users"
+# ユーザーのホームとして扱わない Windows の組み込みプロファイル
+WIN_SYSTEM_PROFILES = ("Public", "Default", "Default User", "All Users")
 
 VOICEPEAK_EXE_CANDIDATES = (
     "Program Files/VOICEPEAK/voicepeak.exe",
@@ -55,15 +65,33 @@ def is_wsl() -> bool:
 
 
 def interop_enabled() -> bool:
-    """``.exe`` の直接実行 (binfmt_misc 経由) が有効か."""
+    """``.exe`` の直接実行 (binfmt_misc 経由) が有効か.
+
+    ``/proc/sys/fs/binfmt_misc/WSLInterop`` の 1 行目が ``enabled`` か
+    ``disabled`` になる。ファイル全体の部分一致では ``interpreter`` 行などに
+    引っかかり得るので、先頭行だけを完全一致で見る。
+    """
     for name in ("WSLInterop", "WSLInterop-late"):
-        path = Path("/proc/sys/fs/binfmt_misc") / name
+        path = BINFMT_MISC_DIR / name
         try:
-            if path.is_file() and "enabled" in path.read_text(encoding="utf-8", errors="replace"):
-                return True
+            if not path.is_file():
+                continue
+            head = path.read_text(encoding="utf-8", errors="replace").splitlines()[:1]
         except OSError:
             continue
+        if head and head[0].strip() == "enabled":
+            return True
     return False
+
+
+def env_temp_root() -> Optional[Path]:
+    """``CC_VOICEPEAK_TEMP`` による作業ディレクトリの明示指定.
+
+    ブリッジの種類によらず ``temp_root()`` を呼ぶ時点で評価する
+    (インスタンス生成後に環境変数を変えた場合の挙動を揃えるため)。
+    """
+    override = os.environ.get("CC_VOICEPEAK_TEMP")
+    return Path(override) if override else None
 
 
 class Bridge:
@@ -101,12 +129,8 @@ class LocalBridge(Bridge):
     name = "local"
 
     def __init__(self, temp_root: Optional[Path] = None, exe: Optional[Path] = None):
-        env_root = os.environ.get("CC_VOICEPEAK_TEMP")
-        self._temp = Path(
-            temp_root
-            or env_root
-            or (Path(os.environ.get("TMPDIR", "/tmp")) / "cc-voicepeak")
-        )
+        self._explicit_temp = Path(temp_root) if temp_root else None
+        self._temp_root: Optional[Path] = None
         self._exe = Path(exe) if exe else None
 
     def to_win(self, path: os.PathLike | str) -> str:
@@ -116,10 +140,16 @@ class LocalBridge(Bridge):
         return Path(win_path)
 
     def temp_root(self) -> Path:
-        return self._temp
+        if self._temp_root is None:
+            self._temp_root = (
+                self._explicit_temp
+                or env_temp_root()
+                or Path(os.environ.get("TMPDIR", "/tmp")) / "cc-voicepeak"
+            )
+        return self._temp_root
 
     def exec_cwd(self) -> str:
-        return str(self._temp)
+        return str(self.temp_root())
 
     def find_voicepeak(self) -> Optional[Path]:
         if self._exe and self._exe.exists():
@@ -192,13 +222,13 @@ class WslBridge(Bridge):
         if self._temp_root is not None:
             return self._temp_root
 
-        override = os.environ.get("CC_VOICEPEAK_TEMP")
+        override = env_temp_root()
         if override:
-            self._temp_root = Path(override)
+            self._temp_root = override
             return self._temp_root
 
         for candidate in self._windows_temp_candidates():
-            if candidate and candidate.is_dir():
+            if candidate.is_dir():
                 self._temp_root = candidate / "cc-voicepeak"
                 return self._temp_root
 
@@ -206,23 +236,30 @@ class WslBridge(Bridge):
         self._temp_root = Path(os.environ.get("TMPDIR", "/tmp")) / "cc-voicepeak"
         return self._temp_root
 
-    def _windows_temp_candidates(self) -> List[Optional[Path]]:
-        candidates: List[Optional[Path]] = []
+    def _windows_temp_candidates(self) -> Iterator[Path]:
+        """Windows の TEMP 候補を優先度順に返す.
+
+        ジェネレータにして、キャッシュ済みの候補が使えるうちは
+        ``cmd.exe`` を起動しないようにしている (起動コストが大きい)。
+        """
         cached = _read_cached_wintemp()
         if cached:
-            candidates.append(cached)
+            yield cached
 
         env_temp = self._query_windows_env("TEMP")
         if env_temp:
-            path = self.to_linux(env_temp)
-            _write_cached_wintemp(path)
-            candidates.append(path)
+            try:
+                path = self.to_linux(env_temp)
+            except BridgeError as exc:
+                log.warning("Windows の TEMP を変換できませんでした: %s", exc)
+            else:
+                _write_cached_wintemp(path)
+                yield path
 
         user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
         if user:
-            candidates.append(Path(f"/mnt/c/Users/{user}/AppData/Local/Temp"))
-        candidates.append(Path("/mnt/c/Windows/Temp"))
-        return candidates
+            yield Path(f"{WIN_USERS_DIR}/{user}/AppData/Local/Temp")
+        yield Path(f"{WIN_DRIVE_ROOTS[0]}/Windows/Temp")
 
     def _query_windows_env(self, name: str) -> Optional[str]:
         try:
@@ -246,8 +283,8 @@ class WslBridge(Bridge):
 
     # -- voicepeak.exe の探索 ---------------------------------------------
     def find_voicepeak(self) -> Optional[Path]:
-        drives = [Path(f"/mnt/{letter}") for letter in ("c", "d", "e")]
-        for drive in drives:
+        for root in WIN_DRIVE_ROOTS:
+            drive = Path(root)
             if not drive.is_dir():
                 continue
             for rel in VOICEPEAK_EXE_CANDIDATES:
@@ -255,14 +292,14 @@ class WslBridge(Bridge):
                 if candidate.is_file():
                     return candidate
 
-        users = Path("/mnt/c/Users")
+        users = Path(WIN_USERS_DIR)
         if users.is_dir():
             try:
                 entries = sorted(users.iterdir())
             except OSError:
                 entries = []
             for home in entries:
-                if home.name in ("Public", "Default", "Default User", "All Users"):
+                if home.name in WIN_SYSTEM_PROFILES:
                     continue
                 for rel in VOICEPEAK_USER_CANDIDATES:
                     candidate = home / rel
@@ -313,9 +350,19 @@ def detect_bridge(force: Optional[str] = None) -> Bridge:
 def resolve_exe(bridge: Bridge, configured: Optional[str]) -> Path:
     """設定または自動探索で voicepeak の実体パスを決める."""
     if configured:
-        raw = str(configured)
-        path = bridge.to_linux(raw) if re.match(r"^[a-zA-Z]:[\\/]", raw) else Path(raw)
+        raw = str(configured).strip()
+        # ドライブレター表記 (C:\...) と UNC (\\wsl.localhost\...) はどちらも
+        # Windows 形式なので Linux 側のパスへ変換してから存在を確認する
+        if re.match(r"^[a-zA-Z]:[\\/]", raw) or raw.startswith("\\\\"):
+            path = bridge.to_linux(raw)
+        else:
+            path = Path(raw).expanduser()
         if path.is_file():
+            if not os.access(path, os.X_OK):
+                raise BridgeError(
+                    f"voicepeak.exe に実行権限がありません: {path}\n"
+                    "chmod +x するか、実行権限のある場所の EXE を指定してください。"
+                )
             return path
         raise BridgeError(
             f"voicepeak.exe が見つかりません: {configured}\n"
