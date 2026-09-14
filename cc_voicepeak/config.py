@@ -21,7 +21,7 @@ import copy
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from .errors import ConfigError
 
@@ -292,33 +292,61 @@ def load_config(
     return cfg
 
 
+def _check_int(cfg: Config, key: str, low: int, high: Optional[int] = None) -> None:
+    """``None`` を許す整数キーの範囲検査 (bool は整数として扱わない)."""
+    value = cfg.get(key)
+    if value is None:
+        return
+    limit = f"{low} 以上" if high is None else f"{low}-{high}"
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"{key} は整数で指定してください ({limit}): {value!r}")
+    if value < low or (high is not None and value > high):
+        raise ConfigError(f"{key} は {limit} です: {value!r}")
+
+
+def _check_choice(cfg: Config, key: str, choices: Sequence[str]) -> None:
+    value = cfg.get(key)
+    if value not in choices:
+        allowed = " / ".join(repr(choice) for choice in choices)
+        raise ConfigError(f"{key} は {allowed} のいずれかです: {value!r}")
+
+
 def _validate(cfg: Config) -> None:
     limit = cfg.get("voicepeak.char_limit")
-    if not isinstance(limit, int) or not 1 <= limit <= VOICEPEAK_CHAR_LIMIT:
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= VOICEPEAK_CHAR_LIMIT:
         raise ConfigError(
             f"voicepeak.char_limit は 1..{VOICEPEAK_CHAR_LIMIT} で指定してください: {limit!r}"
         )
 
-    mode = cfg.get("voicepeak.input_mode")
-    if mode not in ("say", "text_file"):
-        raise ConfigError(f'voicepeak.input_mode は "say" か "text_file" です: {mode!r}')
-
     min_fill = cfg.get("split.min_fill")
-    if not isinstance(min_fill, (int, float)) or not 0.0 <= float(min_fill) <= 1.0:
+    if (
+        isinstance(min_fill, bool)
+        or not isinstance(min_fill, (int, float))
+        or not 0.0 <= float(min_fill) <= 1.0
+    ):
         raise ConfigError(f"split.min_fill は 0.0-1.0 の数値です: {min_fill!r}")
 
-    speed = cfg.get("voicepeak.speed")
-    if speed is not None and not 50 <= int(speed) <= 200:
-        raise ConfigError(f"voicepeak.speed は 50-200 です: {speed!r}")
+    _check_int(cfg, "voicepeak.speed", 50, 200)
+    _check_int(cfg, "voicepeak.pitch", -300, 300)
+    _check_int(cfg, "voicepeak.timeout", 1)
+    _check_int(cfg, "voicepeak.retries", 0)
+    _check_int(cfg, "voicepeak.cache_max_files", 0)
+    _check_int(cfg, "normalize.max_total_chars", 0)
+    _check_int(cfg, "hook.min_chars", 0)
+    _check_int(cfg, "player.volume", 0, 100)
+    _check_int(cfg, "log.max_bytes", 1)
 
-    pitch = cfg.get("voicepeak.pitch")
-    if pitch is not None and not -300 <= int(pitch) <= 300:
-        raise ConfigError(f"voicepeak.pitch は -300-300 です: {pitch!r}")
+    _check_choice(cfg, "voicepeak.input_mode", ("say", "text_file"))
+    _check_choice(cfg, "split.width_mode", ("codepoints", "halfwidth_half"))
+    _check_choice(cfg, "normalize.code_blocks", ("drop", "placeholder", "read"))
+    _check_choice(cfg, "normalize.inline_code", ("read", "drop"))
+    _check_choice(cfg, "normalize.tables", ("drop", "read"))
+    _check_choice(
+        cfg, "player.backend", ("auto", "powershell", "paplay", "aplay", "ffplay", "none")
+    )
+    _check_choice(cfg, "hook.on_busy", ("replace", "queue", "skip"))
+    _check_choice(cfg, "log.level", ("debug", "info", "warning", "error", "off"))
 
-    backend = cfg.get("player.backend")
-    if backend not in ("auto", "powershell", "paplay", "aplay", "ffplay", "none"):
-        raise ConfigError(f"player.backend の値が不正です: {backend!r}")
-
-    on_busy = cfg.get("hook.on_busy")
-    if on_busy not in ("replace", "queue", "skip"):
-        raise ConfigError(f'hook.on_busy は "replace"/"queue"/"skip" です: {on_busy!r}')
+    events = cfg.get("hook.events")
+    if not isinstance(events, list) or not all(isinstance(event, str) for event in events):
+        raise ConfigError(f"hook.events は文字列のリストです: {events!r}")

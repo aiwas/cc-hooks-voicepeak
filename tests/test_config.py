@@ -151,6 +151,56 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(ConfigError):
             load_config(overrides={"player.backend": "mplayer"})
 
+    def test_out_of_range_values_are_rejected(self):
+        cases = [
+            {"voicepeak": {"pitch": 9999}},
+            {"voicepeak": {"timeout": 0}},
+            {"voicepeak": {"retries": -1}},
+            {"voicepeak": {"cache_max_files": -1}},
+            {"normalize": {"max_total_chars": -1}},
+            {"hook": {"min_chars": -1}},
+            {"player": {"volume": 200}},
+            {"split": {"min_fill": 1.5}},
+        ]
+        for data in cases:
+            with self.subTest(data=data):
+                self.project_config(data)
+                with self.assertRaises(ConfigError):
+                    load_config()
+
+    def test_invalid_enum_values_are_rejected(self):
+        cases = [
+            {"voicepeak": {"input_mode": "stdin"}},
+            {"split": {"width_mode": "???"}},
+            {"normalize": {"code_blocks": "???"}},
+            {"normalize": {"inline_code": "???"}},
+            {"normalize": {"tables": "???"}},
+            {"hook": {"on_busy": "wait"}},
+            {"log": {"level": "trace"}},
+        ]
+        for data in cases:
+            with self.subTest(data=data):
+                self.project_config(data)
+                with self.assertRaises(ConfigError):
+                    load_config()
+
+    def test_hook_events_must_be_a_list_of_strings(self):
+        self.project_config({"hook": {"events": "Stop"}})
+        with self.assertRaises(ConfigError):
+            load_config()
+
+    def test_boolean_is_not_accepted_as_integer(self):
+        self.project_config({"hook": {"min_chars": True}})
+        with self.assertRaises(ConfigError):
+            load_config()
+
+    def test_top_level_must_be_an_object(self):
+        path = Path(os.environ["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("[1, 2]", encoding="utf-8")
+        with self.assertRaises(ConfigError):
+            load_config()
+
     def test_sources_are_reported(self):
         path = self.write(
             Path(os.environ["XDG_CONFIG_HOME"]) / "cc-voicepeak" / "config.json", {}
