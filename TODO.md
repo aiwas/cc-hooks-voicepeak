@@ -133,9 +133,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 - **`player.py:265`** `CommandPlayer` に再生タイムアウトが無い。`finish()` は
   `join(timeout=None)`、ワーカ内の `wait()` にも timeout が無く、`aplay` がデバイス待ちで
   停止すると常駐プロセスが永久に残る
-- **`player.py:293`** `auto` かつ WSL で `powershell.exe` の存在を確認せず選択する
-  （`diagnose.py:130` は確認しているのに実行経路は見ていない）。`appendWindowsPath=false`
-  の環境では無音のまま合成だけが進む。`pwsh.exe` や絶対パスへのフォールバックを
 - **`player.py:281`** `player.volume` が powershell バックエンドに渡らず、WSL 既定経路では
   設定しても効果がない。`SoundPlayer` では音量制御できない旨を `check` で警告する
 - **`player.py:244`** ワーカスレッドが `PlayerError` で静かに停止し、以降の `enqueue()` が
@@ -176,8 +173,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
   `DEFAULTS` に無いキーを `check` で WARN として列挙したい
 - **`cli.py:371`** `install-hook` が常に `$CLAUDE_PROJECT_DIR/bin/...` を出力する。
   `pip install -e .` 経由では `bin/` が無く動かない。`--installed` 相当のオプションを
-- **`diagnose.py:129`** `backend="auto"` かつ非 WSL で、detail も hint も空の WARN 行に
-  なる。paplay/aplay/ffplay の実在チェックを行う
 
 ### ログ
 
@@ -213,7 +208,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 - **`cli.py:173`** `split --json` は空入力でも 0、非 JSON 分岐は 1。終了コードを揃える
 - **`cli.py:154`** `-f` のファイル不在で `FileNotFoundError` のトレースバックが出る
 - **`logging_util.py:50`** `log.level=off` でもログファイルとディレクトリが作られる
-- **`diagnose.py:229`** `powershell_available()` がどこからも参照されていない
 - **`hook.py:36`** `read_payload` が stdin tty のとき無限待ちになる。
   手動で `cc-voicepeak hook` を叩くと固まる
 - **`hook.py:118`** 分離プロセスへの stdin 書き込みがパイプバッファ（通常 64KB）超で
@@ -225,14 +219,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 - **`synth.py:128`** `work_dir` が PID のみで一意化されており、PID 再利用で衝突する
 - **`synth.py:129`** 一時領域が `/mnt/c/Windows/Temp` になった場合、`cache/<sha1>.wav` が
   予測可能な名前で他ユーザから書き換え可能な場所に置かれる
-- **`bridge.py:209`** wintemp キャッシュが有効でも毎回 `cmd.exe` を起動する
-  （`_query_windows_env` が候補リスト構築時に必ず走る）。遅延評価にする
-- **`bridge.py:62`** interop 判定が `"enabled" in <ファイル全体>` の部分一致。
-  先頭行の完全一致にする
-- **`bridge.py:313`** `resolve_exe` が UNC パス（`\\wsl.localhost\...`）を変換せず、
-  実行権限も確認しない
-- **`bridge.py:191,103`** `CC_VOICEPEAK_TEMP` の評価タイミングが `LocalBridge` と
-  `WslBridge` で不統一
 - **`normalize.py:155`** `if v is not None` のため、設定で明示的に null を指定しても
   既定値に戻る
 - **`normalize.py:19`** `_BLOCKQUOTE` が 1 段しか除去せず、`> > 引用` の `>` が残る
@@ -299,8 +285,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
   設定ファイル内の非数値文字列（高 6）が未カバー
 - **CLI** — `emotions`、`check --synth`、`install-hook --events`、`speak --player`、
   `speak --concat`、`--log-level`/`-v`
-- **`bridge.py`** — `temp_root()` の候補選択、`_query_windows_env`、wintemp キャッシュの
-  読み書き、`find_voicepeak` の Users/AppData 分岐（`Public`/`Default` 除外）
 - **`locking.py`** — `update()`、`clear()` の他プロセス判定、taskkill 失敗時、
   `wait_until_free` が True を返す経路
 - **`normalize.py`** — `code_blocks="read"`、`inline_code="drop"`、未クローズフェンス、

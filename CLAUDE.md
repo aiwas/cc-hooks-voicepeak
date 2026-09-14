@@ -120,6 +120,8 @@ WSL 側のパスを cwd にして Windows EXE を起動すると
 `\\wsl.localhost\...`（9p 経由）への書き込みは遅く、環境によっては失敗する。
 既定では Windows の `%TEMP%\cc-voicepeak` を使う。`%TEMP%` は初回だけ
 `cmd.exe /d /c echo %TEMP%` で取得して `~/.cache/cc-voicepeak/wintemp` にキャッシュする。
+候補列挙（`_windows_temp_candidates()`）はジェネレータなので、キャッシュが使える限り
+`cmd.exe` は起動しない。
 明示する場合は `CC_VOICEPEAK_TEMP=/mnt/c/temp/cc-voicepeak`。
 Windows の TEMP がどうしても見つからないときだけ、最後の手段として
 `$TMPDIR`（既定 `/tmp`）配下に落ちる（遅いうえ環境によっては失敗する）。
@@ -147,6 +149,11 @@ while ($true) {
 
 スクリプトは `-EncodedCommand`（UTF-16LE + Base64）で渡しているので、
 実行ポリシーや引数クォートの問題を踏まない。
+
+実行ファイルは `player.find_powershell()` が `powershell.exe` → `pwsh.exe` の順に
+PATH を探し、無ければ `POWERSHELL_FALLBACKS` の既定インストール先を見る
+（`appendWindowsPath=false` でも動くように）。それでも見つからなければ
+`backend="auto"` は WSL 側の `paplay` などへ落ちる。無言で無音にはしない。
 WSLg で PulseAudio が使える環境なら `player.backend` に `paplay` / `aplay` / `ffplay`
 も選べる（`CommandPlayer`。WSL 側で完結する）。
 
