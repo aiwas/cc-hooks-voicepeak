@@ -292,8 +292,33 @@ class PlayerScriptTest(unittest.TestCase):
         self.assertEqual(select_player("none", LocalBridge()).name, "none")
 
     def test_wsl_bridge_defaults_to_powershell(self):
-        player = select_player("auto", WslBridge())
+        with mock.patch("cc_voicepeak.player.find_powershell", return_value="powershell.exe"):
+            player = select_player("auto", WslBridge())
         self.assertEqual(player.name, "powershell")
+
+    def test_auto_falls_back_when_powershell_is_missing(self):
+        # appendWindowsPath=false の環境。powershell を選ぶと無音になる
+        def which(name):
+            return "/usr/bin/paplay" if name == "paplay" else None
+
+        with mock.patch("cc_voicepeak.player.find_powershell", return_value=None):
+            with mock.patch("shutil.which", side_effect=which):
+                player = select_player("auto", WslBridge())
+        self.assertEqual(player.name, "paplay")
+
+    def test_explicit_powershell_without_executable_raises(self):
+        from cc_voicepeak.errors import PlayerError
+
+        with mock.patch("cc_voicepeak.player.find_powershell", return_value=None):
+            with self.assertRaises(PlayerError):
+                select_player("powershell", WslBridge())
+
+    def test_find_powershell_uses_known_install_path(self):
+        from cc_voicepeak.player import POWERSHELL_FALLBACKS, find_powershell
+
+        with mock.patch("shutil.which", return_value=None):
+            with mock.patch.object(Path, "is_file", lambda self: True):
+                self.assertEqual(find_powershell(), POWERSHELL_FALLBACKS[0])
 
     def test_missing_command_backend_raises(self):
         from cc_voicepeak.errors import PlayerError
