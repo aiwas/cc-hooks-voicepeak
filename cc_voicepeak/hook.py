@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Tuple
 
@@ -32,6 +33,14 @@ DETACH_ENV = "CC_VOICEPEAK_DETACHED"
 def read_payload(stream=None) -> Dict[str, Any]:
     """hook の stdin (JSON) を読む. JSON でなければ ``{"message": <生テキスト>}``."""
     stream = stream or sys.stdin
+    if stream is None:
+        return {}
+    try:
+        # 手動で `cc-voicepeak hook` を叩いたときに入力待ちで固まらないようにする
+        if stream.isatty():
+            return {}
+    except (AttributeError, ValueError, OSError):
+        pass
     try:
         raw = stream.read()
     except (OSError, UnicodeDecodeError):
@@ -124,10 +133,29 @@ def spawn_detached(
             env=env,
             cwd=str(Path.cwd()),
         )
-    try:
-        assert proc.stdin is not None
-        proc.stdin.write(text.encode("utf-8"))
-        proc.stdin.close()
-    except (BrokenPipeError, OSError) as exc:
-        log.warning("読み上げプロセスへの書き込みに失敗しました: %s", exc)
+    _write_stdin(proc, text.encode("utf-8"))
     return proc.pid
+
+
+def _write_stdin(proc: "subprocess.Popen", data: bytes, timeout: float = 5.0) -> None:
+    """子プロセスの標準入力へ本文を渡す.
+
+    本文がパイプバッファ (通常 64KB) を超えると、子が読み進めるまで write が
+    ブロックする。hook は Claude Code の timeout (既定 10 秒) 内に終わらないと
+    いけないので、別スレッドへ逃がして待ち時間に上限を設ける。
+    """
+    if proc.stdin is None:  # pragma: no cover - PIPE を指定しているので通らない
+        return
+
+    def pump() -> None:
+        try:
+            proc.stdin.write(data)
+            proc.stdin.close()
+        except (BrokenPipeError, OSError) as exc:
+            log.warning("読み上げプロセスへの書き込みに失敗しました: %s", exc)
+
+    writer = threading.Thread(target=pump, name="cc-voicepeak-stdin", daemon=True)
+    writer.start()
+    writer.join(timeout)
+    if writer.is_alive():
+        log.warning("読み上げプロセスへの本文送信が %.0f 秒で終わりませんでした", timeout)
