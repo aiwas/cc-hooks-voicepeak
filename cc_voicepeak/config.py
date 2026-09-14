@@ -237,6 +237,26 @@ def config_search_paths() -> List[Path]:
     return paths
 
 
+def unknown_keys(cfg: Config) -> List[str]:
+    """``DEFAULTS`` に無いキーを ``"voicepeak.narator"`` の形で列挙する.
+
+    綴り誤りは黙って無視されてしまうので、``check`` で警告するために使う。
+    """
+    return sorted(_walk_unknown(cfg.as_dict(), DEFAULTS, ""))
+
+
+def _walk_unknown(data: Dict[str, Any], defaults: Dict[str, Any], prefix: str) -> List[str]:
+    found: List[str] = []
+    for key, value in data.items():
+        dotted = f"{prefix}{key}"
+        if key not in defaults:
+            found.append(dotted)
+            continue
+        if isinstance(value, dict) and isinstance(defaults[key], dict):
+            found.extend(_walk_unknown(value, defaults[key], f"{dotted}."))
+    return found
+
+
 def _merge_files(data: Dict[str, Any], paths: List[Path], used: List[Path]) -> None:
     """設定ファイルを順に読み込んで ``data`` へ重ねる."""
     for path in paths:

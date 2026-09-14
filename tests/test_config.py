@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cc_voicepeak.config import VOICEPEAK_CHAR_LIMIT, load_config
+from cc_voicepeak.config import VOICEPEAK_CHAR_LIMIT, load_config, unknown_keys
 from cc_voicepeak.errors import ConfigError
 
 
@@ -200,6 +200,15 @@ class ConfigTest(unittest.TestCase):
         path.write_text("[1, 2]", encoding="utf-8")
         with self.assertRaises(ConfigError):
             load_config()
+
+    def test_unknown_keys_are_listed(self):
+        self.project_config({"voicepeak": {"narator": "誤字"}, "unknown_section": {}})
+        self.assertEqual(
+            unknown_keys(load_config()), ["unknown_section", "voicepeak.narator"]
+        )
+
+    def test_no_unknown_keys_by_default(self):
+        self.assertEqual(unknown_keys(load_config()), [])
 
     def test_sources_are_reported(self):
         path = self.write(

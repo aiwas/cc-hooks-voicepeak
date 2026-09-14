@@ -229,6 +229,17 @@ class MiscCommandTest(CliTestCase):
         proc = self.run_cli("narrators", check=True)
         self.assertIn("Fake Narrator A", proc.stdout.decode("utf-8"))
 
+    def test_check_warns_about_unknown_keys(self):
+        path = Path(self.env["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"voicepeak": {"narator": "誤字"}}), encoding="utf-8"
+        )
+        proc = self.run_cli("check")
+        output = proc.stdout.decode("utf-8")
+        self.assertIn("設定キー", output)
+        self.assertIn("voicepeak.narator", output)
+
     def test_check_reports_items(self):
         proc = self.run_cli("check")
         output = proc.stdout.decode("utf-8")
