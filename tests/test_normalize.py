@@ -65,6 +65,21 @@ class NormalizeTest(unittest.TestCase):
     def test_path_with_line_number(self):
         self.assertIn("120行目", run("/home/u/a/b.py:120 が原因です。"))
 
+    def test_date_is_not_treated_as_path(self):
+        self.assertEqual(run("2024/09/14 に実施しました。"), "2024/09/14 に実施しました。")
+
+    def test_japanese_slash_is_not_treated_as_path(self):
+        self.assertEqual(run("読み/書き の権限です。"), "読み/書きの権限です。")
+
+    def test_and_or_is_not_treated_as_path(self):
+        self.assertEqual(run("AND/OR を指定。"), "AND/OR を指定。")
+
+    def test_windows_path_is_shortened(self):
+        self.assertEqual(run("C:\\work\\a\\b.txt を開く。"), "b.txt を開く。")
+
+    def test_relative_path_without_extension_is_kept(self):
+        self.assertEqual(run("src/cc を見る。"), "src/cc を見る。")
+
     def test_emoji_is_stripped(self):
         self.assertEqual(run("完了しました\U0001F389"), "完了しました")
 

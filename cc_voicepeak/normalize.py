@@ -39,10 +39,17 @@ _HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
 _TOOL_MARKER = re.compile(r"^\s*(?:⏺|●|·|✓|✗|⎿)\s*")
 
 # パス: /a/b/c.py, ./src/x.ts, C:\a\b.txt, src/foo/bar.py:120
+# 相対パスの分岐を ASCII に限定する。\w は Unicode 対応なので、そのままだと
+# 「読み/書き」のような日本語まで拾ってしまう。
 _PATHISH = re.compile(
-    r"(?<![\w/\\.:])((?:[A-Za-z]:\\|~/|\./|/)[\w.\-/\\+@]{2,}|(?:[\w.\-]+/){1,}[\w.\-]+)"
+    r"(?<![\w/\\.:])((?:[A-Za-z]:\\|~/|\./|/)[\w.\-/\\+@]{2,}"
+    r"|(?:[A-Za-z0-9_.\-]+/)+[A-Za-z0-9_.\-]+)"
     r"(:\d+(?::\d+)?)?"
 )
+# ルート/ドライブ/明示的な相対指定で始まるか
+_ABSOLUTE_PATH = re.compile(r"^(?:[A-Za-z]:\\|~/|\./|/)")
+# 末尾要素の拡張子 (.py / .tsx など)
+_PATH_EXT = re.compile(r"\.[A-Za-z0-9]{1,8}$")
 
 _EMOJI_RANGES: Sequence[Tuple[int, int]] = (
     (0x1F000, 0x1FAFF),
@@ -95,6 +102,10 @@ def shorten_path(match: "re.Match[str]") -> str:
     tail = body.rstrip(sep).split(sep)[-1]
     if not tail:
         return body + line
+    # 「2024/09/14」「AND/OR」のような非パスを短縮しないよう、相対表記は
+    # 拡張子か行番号がある場合だけパスとして扱う
+    if not _ABSOLUTE_PATH.match(body) and not line and not _PATH_EXT.search(tail):
+        return body
     if line:
         return f"{tail} の{line.lstrip(':').split(':')[0]}行目"
     return tail
