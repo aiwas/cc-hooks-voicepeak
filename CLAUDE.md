@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (316 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (325 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -74,7 +74,7 @@ VOICEPEAK のコマンドラインには 2 つの厳しい制約がある。
 | `cc_voicepeak/locking.py` | EXE 直列化と割り込み制御 |
 | `cc_voicepeak/config.py` | 設定のマージと検証。既定値は `DEFAULTS` |
 | `cc_voicepeak/diagnose.py` | `check` サブコマンドの中身 |
-| `cc_voicepeak/logging_util.py` | ローテーション付きログ |
+| `cc_voicepeak/logging_util.py` | ローテーション付きログ（プロセス間ロック込み） |
 | `cc_voicepeak/wavutil.py` | wav の連結（`player.concat`） |
 
 ## WSL から Windows の EXE を実行する
@@ -327,6 +327,11 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
   その隙に別プロセスが確保して読み上げが重なる）
 - 割り込みで kill する前に、状態ファイルへ記録した `/proc/<pid>/stat` の starttime と
   照合する。PID が再利用されていた場合に無関係なプロセスグループを止めないため
+- hook プロセスとデタッチされた読み上げプロセスは**同じログファイルへ同時に書く**。
+  素の `RotatingFileHandler` はプロセス間ロックを持たず、ローテーションが重なると
+  `doRollover` が `FileNotFoundError` を投げて標準エラーを汚す。
+  `MultiProcessRotatingFileHandler` が `flock` で直列化し、他プロセスがローテーション
+  済みなら inode を見て開き直す
 - **読み上げの失敗で Claude Code の作業を止めない。** `cli.main()` は
   `KeyboardInterrupt` 以外のすべての例外を捕まえ、`hook` サブコマンドのときは 0 を返す。
   `--sync` / `hook.detach: false` の経路も、`cmd_speak()` が非 0 を返したら警告ログに
