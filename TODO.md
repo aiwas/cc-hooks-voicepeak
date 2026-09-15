@@ -11,33 +11,7 @@
 
 ## 優先度: 高
 
-### 1. 長文で読み上げ開始が数十秒遅れる（O(n²)）— `splitter.py:345`
-
-[確認済] `split_text()` がループのたびに残りの全文へ `find_break_points()` を実行する。
-
-| 入力 | 所要時間 |
-|---:|---:|
-| 2,000 文字 | 0.10 秒 |
-| 10,000 文字 | 2.55 秒 |
-| 30,000 文字 | 23.16 秒 |
-
-`normalize.max_total_chars` の既定は 0（無制限）なので、長い応答でそのまま遅延する。
-
-候補列挙を上限ウィンドウ（`remaining[:max_index]` + 接尾辞判定用の数文字）に限定するか、
-全文で 1 回だけ列挙してオフセットを引きながら再利用する。
-
-### 2. `_endswith_any()` が呼び出しごとに `sorted()` する — `splitter.py:183`
-
-1 文字あたり 2 回呼ばれる。`CONJ_SUFFIXES` / `PARTICLES` を長さ降順に並べた
-モジュール定数として持ち、関数内は走査のみにする。1 と併せて対応する。
-
-### 3. `_balance_tail()` が区切りなしで連結する — `splitter.py:386`
-
-`("" if blocks[-2].endswith("\n") else "")` は両分岐とも空文字で、区切り挿入の意図が
-失われている。`split_text` が境界で `lstrip()` した空白が復元されず、
-`"word"` + `"tail"` → `"wordtail"` のように単語が繋がる。
-
-### 4. 割り込み時に作業ディレクトリが必ず残る — `synth.py:128` / `pipeline.py:208`
+### 1. 割り込み時に作業ディレクトリが必ず残る — `synth.py:128` / `pipeline.py:208`
 
 `work_dir = <temp>/run/<pid>` の削除は `pipeline.speak` の `finally` にしかない。
 既定の `on_busy=replace` では対象プロセスが SIGKILL されるため実行されず、
@@ -107,12 +81,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 - **`synth.py:128`** `work_dir` が PID のみで一意化されており、PID 再利用で衝突する
 - **`synth.py:129`** 一時領域が `/mnt/c/Windows/Temp` になった場合、`cache/<sha1>.wav` が
   予測可能な名前で他ユーザから書き換え可能な場所に置かれる
-- **`splitter.py:118`** 未知の `width_mode` が無言で `codepoints` と同じ動作になる
-- **`splitter.py:185`** `startswith(suffix, pos - len(suffix))` を負インデックス判定より
-  先に評価している（短絡で現状は誤検出しないが脆い）
-- **`splitter.py:203`** 条件式の重複（`text[index-2] in ".·・ "` が右辺を包含）
-- **`splitter.py:93`** `code == 0xFF70` は `0xFF66 <= code <= 0xFF9D` に含まれる冗長条件
-- **`splitter.py:364`** `drop_empty` によるテキスト欠落がログにも残らない
 - **`wavutil.py:50`** 無音挿入の判定が `path is not usable[-1]` という同一性比較。
   無音バイト数もフレーム境界に揃わない可能性がある
 - **`wavutil.py:21,39,67`** `contextlib.closing` は不要（`wave.open` は 3.4 以降
@@ -132,7 +100,7 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 
 ## テストの穴
 
-以下は 1 件も検証されていない（2026-09-15 時点、テストは 243 件）。
+以下は 1 件も検証されていない（2026-09-15 時点、テストは 256 件）。
 
 ### 未検証のモジュール
 
@@ -150,8 +118,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 ### 未検証の分岐
 
 - **CLI** — `speak --player`、`speak --concat`
-- **`splitter.py`** — `limit<=0` の `ValueError`、`drop_empty=False`、`\r\n` 入力、
-  サロゲートペアを含む文字列、`describe_blocks`、`char_width`
 - **`transcript.py`** — `content` が None / 非リスト、`isMeta`、`role != "assistant"`、
   JSON として妥当だが dict でない行、空ファイル、`max_lookback`
 
