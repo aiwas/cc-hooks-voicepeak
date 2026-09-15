@@ -113,6 +113,13 @@ class NormalizeTest(unittest.TestCase):
         result = run(text, tables="read")
         self.assertIn("件数、3。", result)
 
+    def test_table_separator_without_leading_pipe_is_dropped(self):
+        text = NL.join(["結果です。", "---|---", "| 件数 | 3 |"])
+        self.assertEqual(run(text), "結果です。")
+
+    def test_nested_blockquote_markers_removed(self):
+        self.assertEqual(run("> > 引用です。"), "引用です。")
+
     def test_horizontal_rule_removed(self):
         self.assertEqual(run(NL.join(["前。", "---", "後。"])), "前。" + NL + "後。")
 

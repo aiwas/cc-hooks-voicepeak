@@ -16,7 +16,7 @@ _TABLE_SEP = re.compile(r"^\s*\|?[\s:\-|]+\|[\s:\-|]*$")
 _HR = re.compile(r"^\s*(?:[-*_]\s*){3,}$")
 _HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.*)$")
 _BULLET = re.compile(r"^\s*(?:[-*+]|\d{1,3}[.)])\s+")
-_BLOCKQUOTE = re.compile(r"^\s{0,3}>\s?")
+_BLOCKQUOTE = re.compile(r"^\s{0,3}(?:>\s?)+")
 _CHECKBOX = re.compile(r"^\[([ xX])\]\s*")
 
 _IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]*)\)")
@@ -159,7 +159,8 @@ def _remove_code_blocks(lines: List[str], mode: str, placeholder: str) -> List[s
 def _handle_tables(lines: List[str], mode: str) -> List[str]:
     out: List[str] = []
     for line in lines:
-        if _TABLE_SEP.match(line) and _TABLE_ROW.match(line):
+        # 区切り行は読み上げようがないので、先頭パイプの無い ---|--- も落とす
+        if _TABLE_SEP.match(line):
             continue
         if _TABLE_ROW.match(line):
             if mode == "drop":
