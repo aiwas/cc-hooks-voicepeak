@@ -166,5 +166,24 @@ class NormalizeTest(unittest.TestCase):
         self.assertEqual(run("List<int> を返す。"), "List<int> を返す。")
         self.assertEqual(run("Vec<T> に詰める。"), "Vec<T> に詰める。")
 
+    def test_unknown_enum_falls_back_to_default(self):
+        text = NL.join(["| 項目 | 値 |", "| 件数 | 3 |"])
+        # tables="???" が read 相当に落ちていた
+        self.assertEqual(run(text, tables="???"), "")
+        self.assertIn("コードブロック", run(NL.join(["```", "x", "```"]), code_blocks="???"))
+
+    def test_explicit_null_is_honoured(self):
+        # null は「空文字」として扱う (既定値に戻さない)
+        self.assertEqual(run("https://example.com", url_placeholder=None), "")
+
+    def test_empty_input(self):
+        self.assertEqual(run(""), "")
+        self.assertEqual(run("   " + NL + "  "), "")
+
+    def test_truncation_without_break_mark(self):
+        result = run("あ" * 50, max_total_chars=10, truncated_suffix="以下省略。")
+        self.assertTrue(result.endswith("以下省略。"))
+        self.assertLessEqual(len(result), 10 + len("以下省略。"))
+
     def test_blank_lines_collapsed(self):
         self.assertEqual(run(NL.join(["前。", "", "", "後。"])), "前。" + NL + "後。")

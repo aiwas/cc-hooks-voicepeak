@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 _FENCE = re.compile(r"^\s*(?:```+|~~~+)(.*)$")
 _TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
@@ -200,11 +200,27 @@ def _line_prefixes(line: str) -> str:
     return line
 
 
-def normalize(text: str, options: Dict[str, object] | None = None) -> str:
-    """読み上げ用に整形した文字列を返す."""
+def _choice(opts: Dict[str, object], key: str, allowed: Sequence[str]) -> str:
+    """列挙値を検証する. 未知の値は既定値に倒す (黙って別の動作にしない)."""
+    value = str(opts.get(key) or "")
+    return value if value in allowed else str(DEFAULT_OPTIONS[key])
+
+
+def _text_option(opts: Dict[str, object], key: str) -> str:
+    """文字列オプション. null は空文字として扱う."""
+    value = opts.get(key)
+    return "" if value is None else str(value)
+
+
+def normalize(text: str, options: Optional[Dict[str, object]] = None) -> str:
+    """読み上げ用に整形した文字列を返す.
+
+    ``options`` の値は null も含めてそのまま採用する (null は「空文字」
+    または「無効」の意味になる)。未知の列挙値は既定値に倒す。
+    """
     opts = dict(DEFAULT_OPTIONS)
     if options:
-        opts.update({k: v for k, v in options.items() if v is not None})
+        opts.update(options)
 
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace(_CODE_MARK, "")  # 退避用の目印と衝突させない
@@ -212,9 +228,11 @@ def normalize(text: str, options: Dict[str, object] | None = None) -> str:
 
     lines = text.split("\n")
     lines = _remove_code_blocks(
-        lines, str(opts["code_blocks"]), str(opts["code_block_placeholder"])
+        lines,
+        _choice(opts, "code_blocks", ("drop", "placeholder", "read")),
+        _text_option(opts, "code_block_placeholder"),
     )
-    lines = _handle_tables(lines, str(opts["tables"]))
+    lines = _handle_tables(lines, _choice(opts, "tables", ("drop", "read")))
 
     cleaned: List[str] = []
     for line in lines:
@@ -224,13 +242,14 @@ def normalize(text: str, options: Dict[str, object] | None = None) -> str:
     text = "\n".join(cleaned)
 
     # リンク・画像
+    url_placeholder = _text_option(opts, "url_placeholder")
     text = _IMAGE.sub(lambda m: m.group(1) or "画像", text)
-    text = _LINK.sub(lambda m: m.group(1) or str(opts["url_placeholder"]), text)
+    text = _LINK.sub(lambda m: m.group(1) or url_placeholder, text)
     text = _AUTOLINK.sub(
-        lambda m: str(opts["url_placeholder"]) if opts["strip_urls"] else m.group(1), text
+        lambda m: url_placeholder if opts["strip_urls"] else m.group(1), text
     )
     if opts["strip_urls"]:
-        text = _BARE_URL.sub(str(opts["url_placeholder"]), text)
+        text = _BARE_URL.sub(url_placeholder, text)
 
     # 強調・打ち消し・インラインコード
     # インラインコードを先に退避する。あとから外すと `get_last_text` の _ や
@@ -244,7 +263,7 @@ def normalize(text: str, options: Dict[str, object] | None = None) -> str:
     text = _INLINE_CODE.sub(stash, text)
     text = _STRIKE.sub(r"\1", text)
     text = _BOLD_ITALIC.sub(r"\2", text)
-    if opts["inline_code"] == "drop":
+    if _choice(opts, "inline_code", ("read", "drop")) == "drop":
         text = _CODE_REF.sub(" ", text)
     else:
         text = _CODE_REF.sub(lambda m: code_spans[int(m.group(1))], text)
@@ -274,7 +293,7 @@ def normalize(text: str, options: Dict[str, object] | None = None) -> str:
 
     limit = int(opts.get("max_total_chars") or 0)
     if limit > 0 and len(text) > limit:
-        text = _truncate(text, limit, str(opts["truncated_suffix"]))
+        text = _truncate(text, limit, _text_option(opts, "truncated_suffix"))
 
     return text
 
