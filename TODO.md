@@ -18,10 +18,6 @@
   `C:/Users/<USER>/AppData/Local/Temp` の両方が外れたときだけ到達する
 - **`pipeline.py:139`** 空入力時に `blocks` が空だと `report.elapsed` を設定せずに
   early return するため、`summary()` が常に「0.0 秒」を報告する
-- **`pyproject.toml`** `[project.urls]` と `Operating System ::` /
-  `Programming Language :: Python :: 3.9` 系の細目 classifier が無い。
-  `license = { file = "LICENSE" }` と `License ::` classifier の併用は
-  setuptools>=77 で非推奨（`license = "MIT"` + `license-files` へ）
 
 ---
 

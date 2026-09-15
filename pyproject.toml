@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
+# PEP 639 の license 式と license-files を解釈できるのが 77 以降
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,17 +9,34 @@ version = "0.1.0"
 description = "Claude Code Hooks の結果を VOICEPEAK に読み上げさせる (WSL -> Windows 連携込み)"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Miyako Kuwano" }]
 keywords = ["claude-code", "hooks", "voicepeak", "tts", "wsl"]
 classifiers = [
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
-  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Developers",
   "Natural Language :: Japanese",
+  # WSL 上 (Linux) で動き、Windows 側の voicepeak.exe を呼び出す
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: Microsoft :: Windows",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Topic :: Utilities",
 ]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/aiwas/cc-hooks-voicepeak"
+Repository = "https://github.com/aiwas/cc-hooks-voicepeak"
+Issues = "https://github.com/aiwas/cc-hooks-voicepeak/issues"
 
 [project.scripts]
 cc-voicepeak = "cc_voicepeak.cli:main"
