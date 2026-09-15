@@ -24,7 +24,15 @@ _LINK = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
 _AUTOLINK = re.compile(r"<((?:https?|ftp)://[^>\s]+)>")
 _BARE_URL = re.compile(r"(?:https?|ftp)://[^\s<>()\[\]「」『』、。]+")
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
-_BOLD_ITALIC = re.compile(r"(\*{1,3}|_{1,3})(?=\S)(.+?)(?<=\S)\1")
+# 強調記号は語の途中では扱わない。`max_total_chars` の _ や `2*3*4` の * を
+# 巻き込まないため。前後の判定は ASCII 英数のみ (日本語を語中扱いすると
+# 「**重要**な点」がマッチしなくなる)。
+_BOLD_ITALIC = re.compile(
+    r"(?<![A-Za-z0-9])(\*{1,3}|_{1,3})(?=\S)(.+?)(?<=\S)\1(?![A-Za-z0-9])"
+)
+# インラインコードの退避に使う目印
+_CODE_MARK = "\x00"
+_CODE_REF = re.compile(r"\x00(\d+)\x00")
 _STRIKE = re.compile(r"~~(.+?)~~")
 _HTML_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
@@ -155,6 +163,7 @@ def normalize(text: str, options: Dict[str, object] | None = None) -> str:
         opts.update({k: v for k, v in options.items() if v is not None})
 
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace(_CODE_MARK, "")  # 退避用の目印と衝突させない
     text = _HTML_COMMENT.sub(" ", text)
 
     lines = text.split("\n")
@@ -180,12 +189,21 @@ def normalize(text: str, options: Dict[str, object] | None = None) -> str:
         text = _BARE_URL.sub(str(opts["url_placeholder"]), text)
 
     # 強調・打ち消し・インラインコード
+    # インラインコードを先に退避する。あとから外すと `get_last_text` の _ や
+    # `2*3*4` の * を強調記号として巻き込んでしまう。
+    code_spans: List[str] = []
+
+    def stash(match: "re.Match[str]") -> str:
+        code_spans.append(match.group(1))
+        return f"{_CODE_MARK}{len(code_spans) - 1}{_CODE_MARK}"
+
+    text = _INLINE_CODE.sub(stash, text)
     text = _STRIKE.sub(r"\1", text)
     text = _BOLD_ITALIC.sub(r"\2", text)
     if opts["inline_code"] == "drop":
-        text = _INLINE_CODE.sub(" ", text)
+        text = _CODE_REF.sub(" ", text)
     else:
-        text = _INLINE_CODE.sub(r"\1", text)
+        text = _CODE_REF.sub(lambda m: code_spans[int(m.group(1))], text)
 
     text = _HTML_TAG.sub(" ", text)
 

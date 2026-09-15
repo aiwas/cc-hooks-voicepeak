@@ -33,6 +33,23 @@ class NormalizeTest(unittest.TestCase):
     def test_inline_code_is_read_without_backticks(self):
         self.assertEqual(run("`split_text` を直しました。"), "split_text を直しました。")
 
+    def test_inline_code_keeps_snake_case(self):
+        self.assertEqual(
+            run("`get_last_assistant_text` を呼ぶ。"), "get_last_assistant_text を呼ぶ。"
+        )
+
+    def test_inline_code_keeps_dunder(self):
+        self.assertEqual(run("`__init__` を定義。"), "__init__ を定義。")
+
+    def test_snake_case_outside_backticks_is_kept(self):
+        self.assertEqual(run("max_total_chars_value を見る。"), "max_total_chars_value を見る。")
+
+    def test_asterisk_between_digits_is_kept(self):
+        self.assertEqual(run("2*3*4 を計算。"), "2*3*4 を計算。")
+
+    def test_inline_code_can_be_dropped(self):
+        self.assertNotIn("split_text", run("`split_text` を直した。", inline_code="drop"))
+
     def test_links_read_label_only(self):
         self.assertEqual(run("[README](https://example.com/a) を見て。"), "README を見て。")
 
