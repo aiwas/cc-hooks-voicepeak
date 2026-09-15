@@ -161,6 +161,26 @@ class TempRootTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {"TMPDIR": str(self.tmp)}):
                 self.assertEqual(WslBridge().temp_root(), self.tmp / "cc-voicepeak")
 
+    def test_shared_windows_temp_is_not_a_candidate(self):
+        """全ユーザ共有の C:\\Windows\\Temp へは落とさない.
+
+        cache/<sha1>.wav は名前が予測でき、命中判定も「存在して 44 バイト超」
+        だけなので、他ユーザが書ける場所だと wav を差し替えられる。
+        実在しても候補に入れず、WSL 側へ落とすこと。
+        """
+        # /mnt/c 相当の直下に Windows/Temp を実在させる
+        (self.tmp / "Windows" / "Temp").mkdir(parents=True)
+        fallback = self.tmp / "wsl-side"
+        fallback.mkdir()
+
+        with mock.patch.object(bridge_module, "WIN_DRIVE_ROOTS", (str(self.tmp),)), \
+                mock.patch.object(WslBridge, "_query_windows_env", return_value=None), \
+                mock.patch.dict(os.environ, {"TMPDIR": str(fallback)}):
+            root = WslBridge().temp_root()
+
+        # 実在していても選ばれず、WSL 側へ落ちる
+        self.assertEqual(root, fallback / "cc-voicepeak")
+
     def test_query_windows_env_uses_last_line(self):
         completed = SimpleNamespace(stdout="C:\\Users\\u\\AppData\\Local\\Temp\n", returncode=0)
         with mock.patch("subprocess.run", return_value=completed):

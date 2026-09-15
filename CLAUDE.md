@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (349 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (350 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -142,8 +142,18 @@ WSL 側のパスを cwd にして Windows EXE を起動すると
 候補列挙（`_windows_temp_candidates()`）はジェネレータなので、キャッシュが使える限り
 `cmd.exe` は起動しない。
 明示する場合は `CC_VOICEPEAK_TEMP=/mnt/c/temp/cc-voicepeak`。
-Windows の TEMP がどうしても見つからないときだけ、最後の手段として
-`$TMPDIR`（既定 `/tmp`）配下に落ちる（遅いうえ環境によっては失敗する）。
+
+候補は `%TEMP%` と `C:\Users\<USER>\AppData\Local\Temp` の 2 つだけで、
+**どちらもそのユーザ専用の領域**。`C:\Windows\Temp` のような全ユーザ共有の場所は
+候補に入れない。キャッシュの wav は `cache/<sha1>.wav`（sha1 は声のパラメータ＋本文）
+という予測できる名前で置かれ、命中判定も「存在して 44 バイトより大きい」だけなので、
+他ユーザが書ける場所だと先回りして wav を置かれ、中身を検証せずに再生してしまう。
+速度よりこちらを優先する。
+
+どちらも見つからないときは最後の手段として `$TMPDIR`（既定 `/tmp`）配下に落ちる
+（9p 経由になるので遅いうえ環境によっては失敗する）。ここに落ちるのは
+`cmd.exe` が使えず、かつユーザプロファイルの Temp も無いという異常な状態なので、
+WARN を出して `CC_VOICEPEAK_TEMP` での明示を促す。
 
 ### 6. 音を鳴らすのも Windows 側にやらせる
 

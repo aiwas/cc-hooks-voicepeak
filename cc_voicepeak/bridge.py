@@ -234,6 +234,12 @@ class WslBridge(Bridge):
 
         # 最後の手段: WSL 側 (\\wsl.localhost 経由になるので遅い)
         self._temp_root = Path(os.environ.get("TMPDIR", "/tmp")) / "cc-voicepeak"
+        log.warning(
+            "Windows 側の TEMP が見つかりません。%s を使いますが、"
+            "9p 経由になるため遅く、環境によっては失敗します。"
+            "CC_VOICEPEAK_TEMP で /mnt/... 配下を指定してください",
+            self._temp_root,
+        )
         return self._temp_root
 
     def _windows_temp_candidates(self) -> Iterator[Path]:
@@ -241,6 +247,13 @@ class WslBridge(Bridge):
 
         ジェネレータにして、キャッシュ済みの候補が使えるうちは
         ``cmd.exe`` を起動しないようにしている (起動コストが大きい)。
+
+        いずれもそのユーザ専用の領域だけを返す。``C:\\Windows\\Temp`` のような
+        全ユーザ共有の領域は候補に入れない。キャッシュの wav は
+        ``cache/<sha1>.wav`` という予測できる名前で置かれ、命中したかどうかは
+        「存在して 44 バイトより大きい」だけで判定している。他ユーザが書ける
+        場所だと、先回りして wav を置かれると中身を検証せずに再生してしまう。
+        ここが全部外れた場合は :meth:`temp_root` が WSL 側へ落とす。
         """
         cached = _read_cached_wintemp()
         if cached:
@@ -259,7 +272,6 @@ class WslBridge(Bridge):
         user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
         if user:
             yield Path(f"{WIN_USERS_DIR}/{user}/AppData/Local/Temp")
-        yield Path(f"{WIN_DRIVE_ROOTS[0]}/Windows/Temp")
 
     def _query_windows_env(self, name: str) -> Optional[str]:
         try:
