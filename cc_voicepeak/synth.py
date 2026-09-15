@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,10 +20,14 @@ from typing import List, Optional, Sequence
 
 from .bridge import Bridge
 from .errors import LockTimeout, SynthError
-from .locking import ExeLock
+from .locking import ExeLock, pid_alive
 from .logging_util import get_logger
 
 log = get_logger("synth")
+
+# 生存しているプロセスの作業ディレクトリでも、これより古ければ掃除する。
+# PID 再利用や別ディストロとの PID 衝突で消し損ねないための保険。
+WORK_DIR_MAX_AGE = 6 * 3600
 
 # 改行以外の制御文字 (voicepeak に渡すと落ちる可能性がある)
 _CONTROL_CHARS = "".join(
@@ -32,6 +37,54 @@ _CONTROL_CHARS = "".join(
 _CONTROL = re.compile("[" + re.escape(_CONTROL_CHARS) + "]")
 _SENTENCE_TAIL = "。．！？!?、，,;；:："
 NEWLINE = chr(10)
+
+
+def new_work_dir(root: Path) -> Path:
+    """このプロセス専用の作業ディレクトリを作る.
+
+    PID だけで名前を決めると、PID が再利用されたときに別プロセスの wav と
+    混ざる。``mkdtemp`` で一意な接尾辞を付ける。
+    """
+    run_root = root / "run"
+    run_root.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f"{os.getpid()}-", dir=str(run_root)))
+
+
+def _owner_alive(entry: Path) -> bool:
+    head = entry.name.split("-", 1)[0]
+    return pid_alive(int(head)) if head.isdigit() else False
+
+
+def prune_work_dirs(
+    root: Path, keep: Optional[Path] = None, max_age: float = WORK_DIR_MAX_AGE
+) -> int:
+    """終了したプロセスが残した作業ディレクトリを消し、消した数を返す.
+
+    ``hook.on_busy = replace`` では対象プロセスが SIGKILL されるため、
+    :func:`pipeline.speak` の ``finally`` による後始末が走らない。放っておくと
+    Windows の ``%TEMP%\\cc-voicepeak\\run\\`` に wav が溜まり続ける。
+    """
+    try:
+        entries = list((root / "run").iterdir())
+    except OSError:
+        return 0
+
+    now = time.time()
+    removed = 0
+    for entry in entries:
+        if entry == keep or not entry.is_dir():
+            continue
+        try:
+            age = now - entry.stat().st_mtime
+        except OSError:
+            age = max_age + 1
+        if _owner_alive(entry) and age < max_age:
+            continue
+        shutil.rmtree(entry, ignore_errors=True)
+        removed += 1
+    if removed:
+        log.debug("古い作業ディレクトリを %d 件削除しました", removed)
+    return removed
 
 
 @dataclass
@@ -125,9 +178,14 @@ class Synthesizer:
         self.cache_max_files = cache_max_files
 
         root = bridge.temp_root()
-        self.work_dir = Path(work_dir) if work_dir else root / "run" / str(os.getpid())
         self.cache_dir = root / "cache"
-        self.work_dir.mkdir(parents=True, exist_ok=True)
+        if work_dir:
+            self.work_dir = Path(work_dir)
+            self.work_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            self.work_dir = new_work_dir(root)
+            # 前回 SIGKILL された読み上げの残骸をここで掃除する
+            prune_work_dirs(root, keep=self.work_dir)
         if self.use_cache:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
