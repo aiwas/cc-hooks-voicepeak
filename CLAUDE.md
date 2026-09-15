@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (282 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (298 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -14,7 +14,17 @@ python3 -m unittest discover -s tests -t .   # テスト全件 (282 件)
 依存パッケージは追加しない方針（Python 3.9+ 標準ライブラリのみ）。
 `tests/fake_voicepeak.py` が本物と同じオプションを受け取り、140 文字超でエラーを返す
 ダミーとして動作するため、Windows も VOICEPEAK も無い環境で分割・直列合成・キャッシュ・
-hook 経路まで通しで検証できる。
+hook 経路まで通しで検証できる。環境変数で挙動を変えられる。
+
+| 変数 | 用途 |
+|---|---|
+| `FAKE_VOICEPEAK_LIMIT` | 文字数上限（既定 140） |
+| `FAKE_VOICEPEAK_HANG` | 指定秒眠る（タイムアウト検証） |
+| `FAKE_VOICEPEAK_ENCODING` | 標準出力の文字コード（cp932 の復号検証） |
+| `FAKE_VOICEPEAK_FAIL_MODE` | `say` / `text_file` — そのモードだけ失敗させる |
+| `FAKE_VOICEPEAK_LOCK` | ロックファイルで同時起動を検出（`ExeLock` の検証） |
+
+再生側は `tests/fake_player.py`、異常終了する EXE は `tests/fake_failing.py`。
 
 ## 全体の流れ
 
@@ -280,12 +290,19 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
 - 成功した wav を即プレイヤへ流し込む（`player.concat: true` なら `wavutil` で
   1 本に連結してから再生。無音の継ぎ目が完全に消える）
 - 同じ文面＋同じ声の wav は SHA-1 キーでキャッシュ再利用（`voicepeak.cache`）。
-  「テストは全部で〜」のような定型句が多い Claude の応答では効果が出やすい
+  「テストは全部で〜」のような定型句が多い Claude の応答では効果が出やすい。
+  書き込みは一時名 → `os.replace` で行う（直接コピーすると、並行プロセスが
+  書きかけの wav を「サイズが 44 超だから有効」と判断して再生し得る）
 - ブロックごとの wav は `<temp>/run/<pid>-<一意な接尾辞>/` に置き、`speak()` の
   `finally` で消す。ただし `on_busy=replace` の割り込みでは SIGKILL されて
   `finally` が走らないため、`Synthesizer` の生成時に `prune_work_dirs()` が
   「プロセスが生きていない、または 6 時間より古い」ディレクトリを掃除する
-- `-s` で失敗したブロックは `-t <file>`（UTF-8・BOM 無し）で自動リトライ
+- `-s` で失敗したブロックは `-t <file>`（UTF-8・BOM 無し）で自動リトライ。
+  `say` と `text_file` を**交互に**試し（`_attempt_modes()`）、試行ごとに
+  待ち時間を倍にする。文字数超過のような恒久的な失敗では同じモードを繰り返さないが、
+  `-s` と `-t` で数え方が違う可能性があるため別モードは 1 度試す
+- `log.level=debug` でも本文はログに残さない。`-s` の値は `redact_command()` が
+  「文字数 + sha1 の先頭」に置き換える
 
 ## Hook の動作
 
