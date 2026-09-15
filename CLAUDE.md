@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (218 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (243 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -181,9 +181,11 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
 | `[README](https://…)` | 「README」 |
 | `https://example.com/x` | 「リンク」 |
 | `src/cc/splitter.py:120` | 「splitter.py の120行目」 |
+| `2024/09/14` `AND/OR` | そのまま（拡張子も行番号も無い相対表記は短縮しない） |
 | `- [x] 分割` | 「完了、分割」 |
+| `入力 → 出力` | 「入力から出力」（他の矢印は読点） |
 | 表・水平線・絵文字 | 落とす |
-| `<div>tag</div>` | 「tag」（タグだけ外して中身は読む） |
+| `<div>tag</div>` | 「tag」（タグだけ外して中身は読む。`List<int>` は残す） |
 | `PR をマージ` | 「プルリクをマージ」（`normalize.replacements` の読み替え辞書） |
 
 読み替え辞書の既定値は `(?i)\bPR\b` のように `\b` を使っているため、
@@ -193,6 +195,21 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
 
 `normalize()` を直接呼ぶときの既定は `DEFAULT_OPTIONS` で、`replacements` は空。
 設定ファイル側の既定値（`config.DEFAULTS`）とは別物なので、両方を直す必要がある。
+未知の列挙値（`tables="???"` など）は `_choice()` が既定値に倒す。null は
+「空文字／無効」として採用する（既定値には戻さない）。
+
+処理順で気をつける点が 3 つある。
+
+1. **インラインコードは強調記号より先に退避する**（`_CODE_MARK` の目印に置き換えて、
+   強調を外してから戻す）。逆にすると `` `get_last_text` `` の `_` を強調記号として
+   巻き込んで `getlasttext` になる。強調の判定自体も語中では行わない
+   （前後の判定は ASCII 英数のみ。日本語を語中扱いすると `**重要**な点` が
+   マッチしなくなる）
+2. **矢印の読み替えは絵文字の除去より先**。`➡` などは絵文字の範囲に入るため、
+   後回しにすると消えてしまう
+3. **閉じフェンスの無いコードブロックは本文へ戻す**（`_remove_code_blocks()` が
+   フェンス内の行をバッファし、EOF 時点で未クローズなら復帰させる）。
+   フェンスを含むコード例や途中で切れた応答で、以降がまるごと消えるのを防ぐ
 
 ### 字句解析して 140 文字以内へ（`splitter.py`）
 

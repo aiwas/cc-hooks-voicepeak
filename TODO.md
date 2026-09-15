@@ -31,46 +31,13 @@
 1 文字あたり 2 回呼ばれる。`CONJ_SUFFIXES` / `PARTICLES` を長さ降順に並べた
 モジュール定数として持ち、関数内は走査のみにする。1 と併せて対応する。
 
-### 3. インラインコード内のスネークケースが壊れる — `normalize.py:184`
-
-[確認済] 強調記号の除去がインラインコード展開より前に走るため、`_` と `*` を巻き込む。
-
-| 入力 | 現状の出力 |
-|---|---|
-| `` `get_last_assistant_text` `` | `getlastassistant_text` |
-| `max_total_chars_value` | `maxtotalcharsvalue` |
-| `__init__` | `_init__` |
-| `2*3*4` | `234` |
-
-`_INLINE_CODE` を先に処理して中身をプレースホルダで保護する。加えて `_` の強調は
-前後が単語構成文字でない場合に限定する。
-
-### 4. パスでない文字列がパス扱いされ前半が消える — `normalize.py:34`
-
-[確認済] `_PATHISH` の `\w` が Unicode 対応のため、日本語や日付を巻き込む。
-
-| 入力 | 現状の出力 |
-|---|---|
-| `2024/09/14 に実施` | `14 に実施` |
-| `読み/書き の権限` | `書きの権限` |
-| `AND/OR` | `OR` |
-
-`(?:[\w.\-]+/){1,}` の分岐を ASCII に限定し、末尾要素が既知の拡張子を持つ場合のみ
-短縮する。
-
-### 5. 閉じられていないコードフェンス以降の本文が消える — `normalize.py:95`
-
-[確認済] `前。\n```py\ncode()\nまだ続く本文です。` → `前。\nコードブロック。`。
-フェンスの数が奇数になる出力（フェンスを含むコード例、途中で切れた応答）で発生する。
-フェンス内の行をバッファし、EOF 時点で未クローズなら本文として復帰させる。
-
-### 6. `_balance_tail()` が区切りなしで連結する — `splitter.py:386`
+### 3. `_balance_tail()` が区切りなしで連結する — `splitter.py:386`
 
 `("" if blocks[-2].endswith("\n") else "")` は両分岐とも空文字で、区切り挿入の意図が
 失われている。`split_text` が境界で `lstrip()` した空白が復元されず、
 `"word"` + `"tail"` → `"wordtail"` のように単語が繋がる。
 
-### 7. 割り込み時に作業ディレクトリが必ず残る — `synth.py:128` / `pipeline.py:208`
+### 4. 割り込み時に作業ディレクトリが必ず残る — `synth.py:128` / `pipeline.py:208`
 
 `work_dir = <temp>/run/<pid>` の削除は `pipeline.speak` の `finally` にしかない。
 既定の `on_busy=replace` では対象プロセスが SIGKILL されるため実行されず、
@@ -131,9 +98,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 - **`transcript.py:74`** 直近 400 件を見るためだけに JSONL 全体をメモリへ読む。
   `deque(iter_entries(path), maxlen=max_lookback)` に置き換える。
   78 行の `entries[-max_lookback:]` は `max_lookback=0` のとき全件になるためガードを
-- **`normalize.py:146,236`** 箇条書き行末に付けた「、」が `_collapse()` の
-  `rstrip("、,")` で必ず除去され、意図したポーズが入らない（実質デッドコード）
-- **`normalize.py:190`** `_HTML_TAG` が `List<int>` のような型表記を削除する
 
 ---
 
@@ -143,15 +107,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 - **`synth.py:128`** `work_dir` が PID のみで一意化されており、PID 再利用で衝突する
 - **`synth.py:129`** 一時領域が `/mnt/c/Windows/Temp` になった場合、`cache/<sha1>.wav` が
   予測可能な名前で他ユーザから書き換え可能な場所に置かれる
-- **`normalize.py:155`** `if v is not None` のため、設定で明示的に null を指定しても
-  既定値に戻る
-- **`normalize.py:19`** `_BLOCKQUOTE` が 1 段しか除去せず、`> > 引用` の `>` が残る
-- **`normalize.py:113`** 先頭パイプの無い区切り行（`---|---`）が読み上げ対象として残る
-- **`normalize.py:50,67`** 絵文字判定の取りこぼしと過剰削除。U+20E3（囲み keycap）の
-  結合記号が残る一方、矢印（0x2190-0x21FF）は削除されるため `入力 → 出力` が
-  `入力出力` になる。矢印は「から」等への置換候補にする方が自然
-- **`normalize.py` 全般** 列挙値に検証が無く、`tables="???"` は `read` 相当、
-  `code_blocks="???"` は `drop` 相当に無言で落ちる
 - **`splitter.py:118`** 未知の `width_mode` が無言で `codepoints` と同じ動作になる
 - **`splitter.py:185`** `startswith(suffix, pos - len(suffix))` を負インデックス判定より
   先に評価している（短絡で現状は誤検出しないが脆い）
@@ -162,10 +117,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
   無音バイト数もフレーム境界に揃わない可能性がある
 - **`wavutil.py:21,39,67`** `contextlib.closing` は不要（`wave.open` は 3.4 以降
   コンテキストマネージャ対応）
-- **`normalize.py:151`** ここだけ `Dict[str, object] | None`（PEP 604）で、
-  他モジュールの `Optional[...]` と不統一。`from __future__ import annotations` が
-  あるため 3.9 でも実行時エラーにはならないが、3.9 で `typing.get_type_hints()` を
-  呼ぶと失敗する
 - **`pipeline.py:139`** 空入力時に `report.elapsed` が設定されず `summary()` が不正確
 - **`pyproject.toml`** `[project.urls]` と `Operating System ::` /
   `Programming Language :: Python :: 3.9` 系の細目 classifier が無い。
@@ -181,7 +132,7 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 
 ## テストの穴
 
-以下は 1 件も検証されていない（2026-09-15 時点、テストは 218 件）。
+以下は 1 件も検証されていない（2026-09-15 時点、テストは 243 件）。
 
 ### 未検証のモジュール
 
@@ -199,8 +150,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 ### 未検証の分岐
 
 - **CLI** — `speak --player`、`speak --concat`
-- **`normalize.py`** — `code_blocks="read"`、`inline_code="drop"`、未クローズフェンス、
-  空文字入力、Windows パス、入れ子引用、区切りマークの無い `max_total_chars` 切り詰め
 - **`splitter.py`** — `limit<=0` の `ValueError`、`drop_empty=False`、`\r\n` 入力、
   サロゲートペアを含む文字列、`describe_blocks`、`char_width`
 - **`transcript.py`** — `content` が None / 非リスト、`isMeta`、`role != "assistant"`、
