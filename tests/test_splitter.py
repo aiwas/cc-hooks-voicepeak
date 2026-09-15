@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import unittest
 
 from cc_voicepeak.splitter import (
@@ -144,6 +145,18 @@ class BreakPointTest(unittest.TestCase):
         blocks = split_text(text, limit=40)
         for block in blocks:
             self.assertLessEqual(text_width(block), 40)
+
+
+class PerformanceTest(unittest.TestCase):
+    def test_long_text_is_split_quickly(self):
+        """候補列挙が残り全文に対して走ると O(n^2) になり数十秒かかる."""
+        base = "実装が完了しました。設定ファイルを読み込み、音声へ変換します。"
+        text = (base * 500)[:30000]
+        started = time.monotonic()
+        blocks = split_text(text)
+        elapsed = time.monotonic() - started
+        self.assertGreater(len(blocks), 100)
+        self.assertLess(elapsed, 5.0, f"30,000 文字の分割に {elapsed:.1f} 秒かかった")
 
 
 if __name__ == "__main__":
