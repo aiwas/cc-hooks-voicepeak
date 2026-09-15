@@ -402,6 +402,11 @@ def select_player(backend: str, bridge: Bridge, volume: Optional[int] = None) ->
     if bridge.name == "wsl":
         found = find_powershell()
         if found:
+            if volume is not None:
+                log.warning(
+                    "player.volume は powershell バックエンドでは効きません "
+                    "(SoundPlayer に音量の API が無いため)"
+                )
             return PowershellPlayer(bridge, executable=found)
         # 見つからないまま powershell を選ぶと、合成だけ進んで無音になる
         log.warning(

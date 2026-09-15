@@ -46,6 +46,19 @@ class PlayerCheckTest(unittest.TestCase):
         self.assertEqual(item.status, OK)
         self.assertIn("paplay", item.name)
 
+    def test_volume_with_powershell_is_warned(self):
+        # SoundPlayer には音量の API が無い
+        with mock.patch("cc_voicepeak.diagnose.find_powershell", return_value="/x/ps.exe"):
+            item = _player_check("auto", WslBridge(), volume=50)
+        self.assertEqual(item.status, WARN)
+        self.assertIn("player.volume", item.detail)
+        self.assertIn("paplay", item.hint)
+
+    def test_volume_with_command_player_is_fine(self):
+        with mock.patch("shutil.which", side_effect=only("paplay", "/usr/bin/paplay")):
+            item = _player_check("paplay", LocalBridge(), volume=50)
+        self.assertEqual(item.status, OK)
+
     def test_explicit_powershell_without_executable_fails(self):
         with mock.patch("cc_voicepeak.diagnose.find_powershell", return_value=None):
             item = _player_check("powershell", WslBridge())
