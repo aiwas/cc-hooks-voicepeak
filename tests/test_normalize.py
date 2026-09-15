@@ -113,6 +113,11 @@ class NormalizeTest(unittest.TestCase):
         self.assertIn("完了、分割", result)
         self.assertIn("未完了、テスト", result)
 
+    def test_bullet_lines_keep_a_pause(self):
+        text = NL.join(["- 分割を直した", "- テストを足した", "- 完了"])
+        # 行末の読点がポーズになる。最終行に垂れ下がった読点だけは落とす
+        self.assertEqual(run(text), "分割を直した、" + NL + "テストを足した、" + NL + "完了")
+
     def test_table_dropped_by_default(self):
         text = NL.join(["結果です。", "| 項目 | 値 |", "|---|---|", "| 件数 | 3 |"])
         self.assertEqual(run(text), "結果です。")

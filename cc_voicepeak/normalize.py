@@ -299,8 +299,11 @@ def _collapse(text: str) -> str:
     text = re.sub(r"。[、,]", "。", text)
     text = re.sub(r"、。", "。", text)
     text = re.sub(r"。{2,}", "。", text)
-    lines = [line.strip().rstrip("、,") for line in text.split("\n")]
-    return "\n".join(line for line in lines if line).strip()
+    # 箇条書きの行末に付けた「、」はポーズとして残す。以前はここで全行から
+    # 落としていたため、_line_prefixes での付加が意味を持っていなかった。
+    lines = [line.strip() for line in text.split("\n")]
+    joined = "\n".join(line for line in lines if line).strip()
+    return joined.rstrip("、,")  # 末尾に垂れ下がった読点だけ落とす
 
 
 def _truncate(text: str, limit: int, suffix: str) -> str:
