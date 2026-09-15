@@ -1,0 +1,20 @@
+{
+  "name": "voicepeak",
+  "displayName": "VOICEPEAK 読み上げ",
+  "version": "0.1.0",
+  "description": "Claude Code のタスク完了と通知を VOICEPEAK に読み上げさせる。WSL から Windows の voicepeak.exe を呼び、140 文字制限を自動分割で吸収する。",
+  "author": {
+    "name": "Miyako Kuwano"
+  },
+  "homepage": "https://github.com/aiwas/cc-hooks-voicepeak",
+  "repository": "https://github.com/aiwas/cc-hooks-voicepeak",
+  "license": "MIT",
+  "keywords": [
+    "voicepeak",
+    "tts",
+    "speech",
+    "wsl",
+    "hooks",
+    "japanese"
+  ]
+}

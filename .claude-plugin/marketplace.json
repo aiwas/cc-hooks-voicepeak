@@ -1,0 +1,32 @@
+{
+  "name": "cc-hooks-voicepeak",
+  "owner": {
+    "name": "Miyako Kuwano",
+    "url": "https://github.com/aiwas"
+  },
+  "description": "VOICEPEAK に Claude Code の応答を読み上げさせるプラグイン",
+  "plugins": [
+    {
+      "name": "voicepeak",
+      "source": "./",
+      "displayName": "VOICEPEAK 読み上げ",
+      "description": "Claude Code のタスク完了と通知を VOICEPEAK に読み上げさせる。WSL から Windows の voicepeak.exe を呼び、140 文字制限を自動分割で吸収する。",
+      "version": "0.1.0",
+      "author": {
+        "name": "Miyako Kuwano"
+      },
+      "homepage": "https://github.com/aiwas/cc-hooks-voicepeak",
+      "repository": "https://github.com/aiwas/cc-hooks-voicepeak",
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": [
+        "voicepeak",
+        "tts",
+        "speech",
+        "wsl",
+        "hooks",
+        "japanese"
+      ]
+    }
+  ]
+}
