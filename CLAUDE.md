@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (325 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (345 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -314,7 +314,10 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
 
 - `cc-voicepeak hook` は stdin の JSON ペイロードを読み、`hook.events` に含まれる
   イベントだけを処理する
-- `Stop` は `transcript_path` の末尾からアシスタント応答を拾う（`transcript.py`）
+- `Stop` は `transcript_path` の末尾からアシスタント応答を拾う（`transcript.py`）。
+  トランスクリプトは長いセッションで数十 MB になるため、全体を読まずに
+  `deque(maxlen=max_lookback)` で末尾だけ保持する（実測 24MB のファイルで
+  ピーク 55MB → 5MB）。`max_lookback` が 0 以下なら全件
 - 読み上げ本体は `setsid` 済みの別プロセスへ渡して即 `exit 0`（`hook.spawn_detached()`）。
   子プロセス側は `CC_VOICEPEAK_DETACHED` が立った状態で動く。
   `--config` / `-v` / `--log-level` は `cc-voicepeak` 直下のオプションなので

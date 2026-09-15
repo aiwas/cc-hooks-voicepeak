@@ -9,16 +9,6 @@
 
 ---
 
-## 優先度: 中
-
-### その他
-
-- **`transcript.py:74`** 直近 400 件を見るためだけに JSONL 全体をメモリへ読む。
-  `deque(iter_entries(path), maxlen=max_lookback)` に置き換える。
-  78 行の `entries[-max_lookback:]` は `max_lookback=0` のとき全件になるためガードを
-
----
-
 ## 優先度: 低
 
 - **`synth.py:129`** 一時領域が `/mnt/c/Windows/Temp` になった場合、`cache/<sha1>.wav` が
@@ -31,23 +21,14 @@
 - **`examples/settings.json:2`** トップレベルの `"$comment"` は Claude Code の settings
   スキーマが警告する可能性がある（未検証）。コピー元として配布するファイルなので
   コメントは README 側に置く方が安全
-- **`tests/test_transcript.py:83`** `tempfile.mkstemp(...)[1]` が fd をリークし、
-  テンポラリファイルも削除されない
 
 ---
 
 ## テストの穴
 
-以下は 1 件も検証されていない（2026-09-15 時点、テストは 325 件）。
-
-### 未検証のモジュール
-
-
-### 未検証の分岐
+以下は未検証（2026-09-15 時点、テストは 345 件）。
 
 - **CLI** — `speak --player`、`speak --concat`
-- **`transcript.py`** — `content` が None / 非リスト、`isMeta`、`role != "assistant"`、
-  JSON として妥当だが dict でない行、空ファイル、`max_lookback`
 
 
 ---

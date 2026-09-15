@@ -17,6 +17,7 @@ Stop hook が受け取る JSON には ``transcript_path`` しか入っていな�
 from __future__ import annotations
 
 import json
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -70,12 +71,17 @@ def last_assistant_text(
     include_sidechain: bool = False,
     max_lookback: int = 400,
 ) -> Optional[str]:
-    """最後のアシスタント応答 (テキストを含むもの) を返す."""
-    entries = list(iter_entries(path))
-    if not entries:
-        return None
+    """最後のアシスタント応答 (テキストを含むもの) を返す.
 
-    for entry in reversed(entries[-max_lookback:]):
+    ``max_lookback`` 件しか見ないので、JSONL 全体をメモリへ読む必要はない
+    (長いセッションでは数十 MB になる)。``deque`` で末尾だけ保持する。
+    ``max_lookback`` が 0 以下なら全件を対象にする
+    (``normalize.max_total_chars`` と同じ約束)。
+    """
+    maxlen = max_lookback if max_lookback > 0 else None
+    entries = deque(iter_entries(path), maxlen=maxlen)
+
+    for entry in reversed(entries):
         if entry.get("type") != "assistant":
             continue
         if entry.get("isSidechain") and not include_sidechain:
