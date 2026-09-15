@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import logging
 import os
 from logging.handlers import RotatingFileHandler
@@ -23,6 +24,80 @@ _configured = False
 logging.getLogger("cc_voicepeak").addHandler(logging.NullHandler())
 
 
+class MultiProcessRotatingFileHandler(RotatingFileHandler):
+    """プロセス間ロック付きの :class:`RotatingFileHandler`.
+
+    hook プロセスとデタッチされた読み上げプロセスが同じログファイルへ同時に
+    書くため、素の ``RotatingFileHandler`` ではローテーションが重なって
+    行が混ざったり失われたりする。``flock`` で 1 レコードずつ直列化し、
+    他プロセスがローテーションしていたら開き直す。
+    """
+
+    def __init__(
+        self,
+        filename,
+        maxBytes: int = 0,
+        backupCount: int = 0,
+        encoding: Optional[str] = None,
+    ):
+        # ロックを取ってから開きたいので遅延オープンにする
+        super().__init__(
+            filename,
+            maxBytes=maxBytes,
+            backupCount=backupCount,
+            encoding=encoding,
+            delay=True,
+        )
+        self._lock_path = str(self.baseFilename) + ".lock"
+        self._guard = None
+
+    def _acquire_guard(self):
+        if self._guard is None:
+            self._guard = open(self._lock_path, "a+")  # noqa: SIM115 - close() で閉じる
+        fcntl.flock(self._guard, fcntl.LOCK_EX)
+        return self._guard
+
+    def _reopen_if_rotated(self) -> None:
+        """他プロセスがローテーションしていたら掴み直す.
+
+        開いたままだと、退避されたファイルへ書き続けてしまう。
+        """
+        if self.stream is None:
+            return
+        try:
+            current = os.fstat(self.stream.fileno()).st_ino
+            latest = os.stat(self.baseFilename).st_ino
+        except OSError:
+            current, latest = 0, 1
+        if current != latest:
+            self.stream.close()
+            self.stream = None  # 次の emit で開き直される
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            guard = self._acquire_guard()
+        except OSError:
+            # ロックを取れなくてもログ自体は落とさない
+            super().emit(record)
+            return
+        try:
+            self._reopen_if_rotated()
+            super().emit(record)
+        finally:
+            try:
+                fcntl.flock(guard, fcntl.LOCK_UN)
+            except OSError:  # pragma: no cover - 解放に失敗しても続行する
+                pass
+
+    def close(self) -> None:
+        try:
+            if self._guard is not None:
+                self._guard.close()
+                self._guard = None
+        finally:
+            super().close()
+
+
 def default_log_path() -> Path:
     base = os.environ.get("XDG_STATE_HOME")
     root = Path(base) if base else Path.home() / ".local" / "state"
@@ -41,22 +116,25 @@ def setup_logging(
     if _configured:
         return logger
 
-    logger.setLevel(_LEVELS.get(str(level).lower(), logging.INFO))
+    resolved = _LEVELS.get(str(level).lower(), logging.INFO)
+    logger.setLevel(resolved)
     logger.propagate = False
     formatter = logging.Formatter(
         "%(asctime)s %(levelname)-7s [%(process)d] %(name)s: %(message)s"
     )
 
-    path = Path(file).expanduser() if file else default_log_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handler: logging.Handler = RotatingFileHandler(
-            path, maxBytes=max(max_bytes, 4096), backupCount=1, encoding="utf-8"
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-    except OSError:
-        pass
+    # "off" のときは 1 行も出ないので、ファイルもディレクトリも作らない
+    if resolved <= logging.CRITICAL:
+        path = Path(file).expanduser() if file else default_log_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handler: logging.Handler = MultiProcessRotatingFileHandler(
+                path, maxBytes=max(max_bytes, 4096), backupCount=1, encoding="utf-8"
+            )
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+        except OSError:
+            pass
 
     if stderr:
         stream = logging.StreamHandler()
