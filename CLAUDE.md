@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (346 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (349 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -188,6 +188,10 @@ PID 行の待機中はプロセスの生存も見る。PID が取れないと `t
 
 テストは `tests/fake_player.py` を `executable` に渡して、標準入力プロトコル
 （PID 行 / wav パス / `__QUIT__`）を実際に動かして確認している。
+CLI 経由（`speak --player powershell`）では `executable` を差し込めないので、
+`find_powershell()` が `shutil.which("powershell.exe")` を引くだけなのを利用して、
+PATH の先頭に `powershell.exe` の名前で `fake_player.py` の起動スクリプトを置く
+（`tests/test_cli.py` の `install_fake_powershell()`）。
 WSLg で PulseAudio が使える環境なら `player.backend` に `paplay` / `aplay` / `ffplay`
 も選べる（`CommandPlayer`。WSL 側で完結する）。
 

@@ -14,6 +14,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 FAKE = REPO / "tests" / "fake_voicepeak.py"
+FAKE_PLAYER = REPO / "tests" / "fake_player.py"
 NL = chr(10)
 
 
@@ -172,6 +173,88 @@ class SpeakCommandTest(CliTestCase):
     def test_empty_input_fails_gracefully(self):
         proc = self.run_cli("speak", "--stdin", stdin="   ")
         self.assertEqual(proc.returncode, 1)
+
+    # -- --player / --concat ------------------------------------------------
+    #
+    # select_player("powershell") は find_powershell() 経由で PATH を引くだけ
+    # なので、PATH の先頭に powershell.exe の名前で代役を置けば、本物を呼ばずに
+    # 常駐プレイヤの経路（PID 行 / wav パス / __QUIT__）をそのまま通せる。
+
+    PLAYED_TEXT = "再生経路の確認をしています。" * 30
+
+    def install_fake_powershell(self) -> Path:
+        played = self.tmp / "played.log"
+        bin_dir = self.tmp / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        shim = bin_dir / "powershell.exe"
+        shim.write_text(
+            "#!/usr/bin/env bash" + NL + f'exec "{sys.executable}" "{FAKE_PLAYER}" "$@"' + NL,
+            encoding="utf-8",
+        )
+        shim.chmod(0o755)
+        self.env["PATH"] = str(bin_dir) + os.pathsep + self.env.get("PATH", "")
+        self.env["FAKE_PLAYER_LOG"] = str(played)
+        return played
+
+    def played_paths(self, played: Path):
+        if not played.exists():
+            return []
+        return [
+            line
+            for line in played.read_text(encoding="utf-8").splitlines()
+            if line.strip() and line != "__QUIT__"
+        ]
+
+    def block_count(self, text: str) -> int:
+        """同じ設定での分割数を数える.
+
+        合成回数 (``recorded_calls()``) は同じ文面がキャッシュに当たると減るので、
+        再生本数の期待値には使えない。
+        """
+        proc = self.run_cli("split", "--stdin", "--json", stdin=text, check=True)
+        return len(json.loads(proc.stdout.decode("utf-8"))["blocks"])
+
+    def test_player_option_selects_the_backend(self):
+        played = self.install_fake_powershell()
+        expected = self.block_count(self.PLAYED_TEXT)
+        self.assertGreater(expected, 1)
+
+        self.run_cli(
+            "speak", "--stdin", "--player", "powershell", stdin=self.PLAYED_TEXT, check=True
+        )
+        paths = self.played_paths(played)
+        # 連結しない場合はブロックごとに 1 本ずつ流し込まれる
+        self.assertEqual(len(paths), expected)
+        for path in paths:
+            self.assertTrue(path.endswith(".wav"), path)
+
+    def test_concat_sends_a_single_file_to_the_player(self):
+        played = self.install_fake_powershell()
+        self.assertGreater(self.block_count(self.PLAYED_TEXT), 1)
+
+        self.run_cli(
+            "speak", "--stdin", "--player", "powershell", "--concat",
+            stdin=self.PLAYED_TEXT, check=True,
+        )
+        # 複数ブロックでも、再生は連結した 1 本だけ
+        self.assertEqual(len(self.played_paths(played)), 1)
+
+    def test_player_option_overrides_the_config_file(self):
+        played = self.install_fake_powershell()
+        # 環境変数は設定ファイルより後に重なるので、外さないと設定が埋もれる
+        self.env.pop("CC_VOICEPEAK_PLAYER", None)
+        self.write_project_config({"player": {"backend": "powershell"}})
+
+        # まず設定ファイルどおりに再生されることを確かめる (空振りの検出)
+        self.run_cli("speak", "--stdin", stdin="設定ファイルの指定で再生されます。", check=True)
+        self.assertEqual(len(self.played_paths(played)), 1)
+
+        played.unlink()
+        self.run_cli(
+            "speak", "--stdin", "--player", "none", stdin="引数のほうが優先されます。", check=True
+        )
+        self.assertTrue(self.recorded_calls())  # 合成はされている
+        self.assertEqual(self.played_paths(played), [])
 
 
 class HookCommandTest(CliTestCase):
