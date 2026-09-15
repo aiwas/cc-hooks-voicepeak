@@ -173,6 +173,12 @@ class SpeakTest(PipelineTestCase):
         self.assertEqual(report.blocks, [])
         self.assertEqual(self.recorded_calls(), [])
 
+    def test_empty_text_still_records_elapsed(self):
+        # 早期 return で elapsed を飛ばすと summary() が常に 0.0 秒と報告する
+        report = speak("   ", self.config(), bridge=self.bridge)
+        self.assertGreater(report.elapsed, 0.0)
+        self.assertIn("0 ブロック", report.summary())
+
     def test_markdown_is_not_read_aloud(self):
         text = chr(10).join(["## 見出し", "```python", "print('x')", "```", "本文です。"])
         speak(text, self.config(), bridge=self.bridge)

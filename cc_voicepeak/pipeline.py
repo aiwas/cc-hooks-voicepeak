@@ -137,6 +137,8 @@ def speak(
     blocks = prepare_blocks(text, cfg)
     report.blocks = blocks
     if not blocks:
+        # 整形と分割は走っているので、その分の時間は報告に残す
+        report.elapsed = time.monotonic() - started
         log.info("読み上げる内容がありません")
         return report
 
