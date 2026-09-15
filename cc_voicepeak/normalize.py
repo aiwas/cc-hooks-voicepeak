@@ -67,12 +67,17 @@ _EMOJI_RANGES: Sequence[Tuple[int, int]] = (
     (0x2B00, 0x2BFF),
     (0xFE00, 0xFE0F),
     (0x1F1E6, 0x1F1FF),
-    (0x2190, 0x21FF),
-    (0x2900, 0x297F),
     (0xE0100, 0xE01EF),
 )
 
-_ZERO_WIDTH = {0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF}
+# U+20E3 は囲み keycap の結合記号 (1️⃣ の末尾)。消さないと数字だけが残る。
+_ZERO_WIDTH = {0x200B, 0x200C, 0x200D, 0x2060, 0x20E3, 0xFEFF}
+
+# 矢印は落とさず読み替える。消すと「入力 → 出力」が「入力出力」になる。
+_ARROW_FROM = "→⇒⟶➔➜➝➞➡⇨"
+_ARROW_OTHER = "←↑↓↔⇐⇑⇓⇔⟵⟷"
+_ARROW_FROM_RE = re.compile(f"[{_ARROW_FROM}]")
+_ARROW_OTHER_RE = re.compile(f"[{_ARROW_OTHER}]")
 
 DEFAULT_OPTIONS: Dict[str, object] = {
     "code_blocks": "placeholder",
@@ -248,6 +253,10 @@ def normalize(text: str, options: Dict[str, object] | None = None) -> str:
 
     if opts["shorten_paths"]:
         text = _PATHISH.sub(shorten_path, text)
+
+    # 矢印の読み替えは絵文字の除去より先に行う (➡ などは絵文字の範囲に入る)
+    text = _ARROW_FROM_RE.sub("から", text)
+    text = _ARROW_OTHER_RE.sub("、", text)
 
     if opts["strip_emoji"]:
         text = strip_emoji(text)

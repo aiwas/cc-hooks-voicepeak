@@ -98,6 +98,15 @@ class NormalizeTest(unittest.TestCase):
     def test_emoji_is_stripped(self):
         self.assertEqual(run("完了しました\U0001F389"), "完了しました")
 
+    def test_keycap_combining_mark_is_stripped(self):
+        self.assertEqual(run("1️⃣ 番目です。"), "1 番目です。")
+
+    def test_arrow_is_read_instead_of_dropped(self):
+        self.assertEqual(run("入力 → 出力 に変換。"), "入力から出力に変換。")
+
+    def test_other_arrows_become_a_pause(self):
+        self.assertEqual(run("親 ← 子 の順。"), "親、子の順。")
+
     def test_checkbox_is_verbalized(self):
         text = NL.join(["- [x] 分割", "- [ ] テスト"])
         result = run(text)
