@@ -24,7 +24,11 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
+
+from .logging_util import get_logger
+
+log = get_logger("splitter")
 
 # ---------------------------------------------------------------------------
 # 優先度
@@ -67,18 +71,25 @@ NO_BREAK_AFTER = set("「『（(【〔〈《〘〖［[｛{“‘＄$¥￥#＃@�
 # 半角語 (英単語・数値・パス・識別子) の内部では切らない
 WORDISH = re.compile(r"[0-9A-Za-z_\-.,:/@#+&'~%=?]")
 
+def _by_length(words: Sequence[str]) -> Tuple[str, ...]:
+    """長い接尾辞から順に照合するため、長さ降順で固定しておく."""
+    return tuple(sorted(words, key=len, reverse=True))
+
+
 # 接続助詞・活用語尾。ここで切ると比較的自然。
-CONJ_SUFFIXES = (
+CONJ_SUFFIXES = _by_length((
     "ので", "のに", "から", "けれども", "けれど", "けども", "けど",
     "ですが", "ますが", "だが", "ですし", "ますし",
     "したが", "ため", "うえで", "あとで", "つつ", "ながら",
     "ましたが", "ました", "ください", "です", "ます",
     "であり", "でして", "まして", "して", "たり", "れば", "ならば",
-)
+))
 # 直前が「て/で/が/し/ば」で終わる用言の切れ目
 CONJ_SINGLE = ("て", "で", "が", "し", "ば")
 # 格助詞
-PARTICLES = ("を", "に", "は", "も", "と", "へ", "や", "より", "まで", "での", "への")
+PARTICLES = _by_length(
+    ("を", "に", "は", "も", "と", "へ", "や", "より", "まで", "での", "への")
+)
 
 # 文字種
 _SCRIPT_OTHER = "other"
@@ -90,7 +101,7 @@ def _script_of(ch: str) -> str:
     code = ord(ch)
     if 0x3040 <= code <= 0x309F:
         return "hira"
-    if 0x30A0 <= code <= 0x30FF or code == 0xFF70 or 0xFF66 <= code <= 0xFF9D:
+    if 0x30A0 <= code <= 0x30FF or 0xFF66 <= code <= 0xFF9D:
         return "kata"
     if 0x4E00 <= code <= 0x9FFF or 0x3400 <= code <= 0x4DBF or ch == "々":
         return "kanji"
@@ -104,6 +115,9 @@ def _script_of(ch: str) -> str:
 # ---------------------------------------------------------------------------
 # 文字幅
 # ---------------------------------------------------------------------------
+WIDTH_MODES = ("codepoints", "halfwidth_half")
+
+
 def char_width(ch: str, mode: str = "codepoints") -> float:
     """1 文字ぶんのカウント値.
 
@@ -180,9 +194,15 @@ def can_break_at(text: str, pos: int) -> bool:
     return True
 
 
-def _endswith_any(text: str, pos: int, suffixes: Iterable[str]) -> Optional[str]:
-    for suffix in sorted(suffixes, key=len, reverse=True):
-        if text.startswith(suffix, pos - len(suffix)) and pos - len(suffix) >= 0:
+def _endswith_any(text: str, pos: int, suffixes: Sequence[str]) -> Optional[str]:
+    """``text[:pos]`` の末尾に一致する接尾辞を返す.
+
+    ``suffixes`` は長さ降順に並んでいる前提 (1 文字あたり 2 回呼ばれるので、
+    ここで毎回 sorted() しない)。
+    """
+    for suffix in suffixes:
+        start = pos - len(suffix)
+        if start >= 0 and text.startswith(suffix, start):
             return suffix
     return None
 
@@ -202,7 +222,7 @@ def _sentence_end_pos(text: str, index: int) -> Optional[int]:
             return None
         if prev_ch and WORDISH.match(prev_ch) and len(prev_ch.encode()) == 1 and index >= 2:
             # "e.g." のような略記: 直前が 1 文字の英字なら文末としない
-            if text[index - 2] in ".·・ " or (index >= 2 and text[index - 2] == "."):
+            if text[index - 2] in ".·・ ":
                 return None
     pos = index + 1
     while pos < len(text) and (text[pos] in SENTENCE_ENDS or text[pos] in TRAILERS):
@@ -280,6 +300,19 @@ def _speakable(text: str) -> bool:
     return bool(text.strip()) and not _ONLY_PUNCT.match(text)
 
 
+# 候補列挙は「上限に収まる範囲＋数文字」だけを見る。全文を毎回走査すると
+# ブロック数 × 残り文字数で O(n^2) になり、長文で読み上げ開始が数十秒遅れる。
+# 数文字の余裕は、後続文字の種類や閉じ括弧の判定に必要なぶん。
+_LOOKAHEAD = 32
+
+
+def _window_size(limit: int, width_mode: str) -> int:
+    """上限に収まりうる最大の文字数 (＋先読み)."""
+    # 1 文字の幅は halfwidth_half で最小 0.5、codepoints では 1.0
+    span = limit * 2 if width_mode == "halfwidth_half" else limit
+    return span + _LOOKAHEAD
+
+
 def _hard_cut(text: str, limit_index: int) -> int:
     """禁則を満たす位置まで戻ってハードカットする位置を返す."""
     pos = min(limit_index, len(text) - 1)
@@ -317,6 +350,9 @@ def split_text(
     """
     if limit <= 0:
         raise ValueError("limit must be positive")
+    if width_mode not in WIDTH_MODES:
+        # 黙って codepoints 相当で動かすと、数え方の違いに気づけない
+        raise ValueError(f"width_mode must be one of {WIDTH_MODES}: {width_mode!r}")
 
     text = text.strip()
     if not text:
@@ -325,15 +361,20 @@ def split_text(
     blocks: List[str] = []
     remaining = text
 
+    window_size = _window_size(limit, width_mode)
+
     while remaining:
-        if text_width(remaining, width_mode) <= limit:
+        # 上限付近までしか見ないので、ウィンドウぶんだけ幅と候補を求める
+        window = remaining[:window_size]
+        widths = _cumulative_widths(window, width_mode)
+
+        if len(window) == len(remaining) and widths[-1] <= limit:
             blocks.append(remaining)
             break
 
-        widths = _cumulative_widths(remaining, width_mode)
         # 上限に収まる最大の index
         max_index = 0
-        for index in range(1, len(remaining) + 1):
+        for index in range(1, len(window) + 1):
             if widths[index] <= limit:
                 max_index = index
             else:
@@ -342,7 +383,7 @@ def split_text(
             max_index = 1
 
         floor_width = limit * float(min_fill)
-        candidates = [bp for bp in find_break_points(remaining) if bp.pos <= max_index]
+        candidates = [bp for bp in find_break_points(window) if bp.pos <= max_index]
 
         chosen: Optional[int] = None
         preferred = [bp for bp in candidates if widths[bp.pos] >= floor_width]
@@ -366,10 +407,12 @@ def split_text(
         for block in blocks:
             if _speakable(block):
                 kept.append(block)
-            elif kept:
-                merged = kept[-1] + block
-                if text_width(merged, width_mode) <= limit:
-                    kept[-1] = merged
+                continue
+            merged = kept[-1] + block if kept else ""
+            if merged and text_width(merged, width_mode) <= limit:
+                kept[-1] = merged
+            else:
+                log.debug("記号のみのブロックを捨てました: %r", block)
         blocks = kept
 
     return blocks
@@ -383,7 +426,15 @@ def _balance_tail(
     if text_width(tail, width_mode) >= limit * 0.3:
         return blocks
 
-    merged = blocks[-2] + ("" if blocks[-2].endswith("\n") else "") + tail
+    # split_text() は境界で lstrip() しているため、そのまま連結すると
+    # "word" + "tail" が "wordtail" になる。半角語どうしが隣り合う場合だけ、
+    # 失われた空白を戻す (日本語の境界には元から空白が無いので入れない)。
+    head = blocks[-2]
+    if head.endswith("\n") or not (WORDISH.match(head[-1]) and WORDISH.match(tail[0])):
+        separator = ""
+    else:
+        separator = " "
+    merged = head + separator + tail
     if text_width(merged, width_mode) <= limit:
         return blocks[:-2] + [merged]
 

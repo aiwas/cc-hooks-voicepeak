@@ -130,6 +130,19 @@ class SplitCommandTest(CliTestCase):
         self.assertIn("ファイルを読み込めません", stderr)
         self.assertNotIn("Traceback", stderr)
 
+    def test_piping_to_head_is_not_an_error(self):
+        # `cc-voicepeak split | head` で Broken pipe を出さない
+        proc = subprocess.run(
+            f"{sys.executable} -m cc_voicepeak split --stdin | head -2",
+            input=("一つ目の文です。" * 60).encode("utf-8"),
+            capture_output=True,
+            cwd=str(REPO),
+            env=self.env,
+            shell=True,
+            timeout=120,
+        )
+        self.assertNotIn("Broken pipe", proc.stderr.decode("utf-8"))
+
     def test_split_text_argument(self):
         proc = self.run_cli("split", "こんにちは。", check=True)
         self.assertIn("こんにちは。", proc.stdout.decode("utf-8"))

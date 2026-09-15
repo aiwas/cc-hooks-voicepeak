@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import sys
 import threading
@@ -470,6 +471,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         return handler(args)
     except KeyboardInterrupt:
         return 130
+    except BrokenPipeError:
+        # `split | head` のようにパイプ先が閉じただけ。終了処理で stdout を
+        # flush して再びエラーにならないよう、devnull へ繋ぎ替えてから抜ける
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        except OSError:  # pragma: no cover - 繋ぎ替えに失敗しても抜けるだけ
+            pass
+        return 0
     except CcVoicepeakError as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         log.error("%s", exc)

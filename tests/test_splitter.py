@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import time
 import unittest
 
 from cc_voicepeak.splitter import (
     PRIO_SENTENCE,
+    _balance_tail,
     can_break_at,
+    char_width,
+    describe_blocks,
     find_break_points,
     split_text,
     text_width,
 )
+
+NL = chr(10)
 
 LONG_JA = (
     "実装が完了しました。まず設定ファイルを読み込む処理を追加し、"
@@ -144,6 +150,80 @@ class BreakPointTest(unittest.TestCase):
         blocks = split_text(text, limit=40)
         for block in blocks:
             self.assertLessEqual(text_width(block), 40)
+
+
+class OptionTest(unittest.TestCase):
+    def test_non_positive_limit_raises(self):
+        for limit in (0, -1):
+            with self.subTest(limit=limit):
+                with self.assertRaises(ValueError):
+                    split_text("テキスト", limit=limit)
+
+    def test_unknown_width_mode_raises(self):
+        # 黙って codepoints 相当で動くと、数え方の違いに気づけない
+        with self.assertRaises(ValueError):
+            split_text("テキスト", width_mode="fullwidth")
+
+    def test_drop_empty_false_keeps_symbol_only_blocks(self):
+        text = "……" + NL + "本文です。"
+        kept = split_text(text, limit=4, drop_empty=False)
+        dropped = split_text(text, limit=4, drop_empty=True)
+        self.assertGreater(len(kept), len(dropped))
+
+    def test_crlf_input(self):
+        blocks = split_text("一行目です。\r\n二行目です。", limit=10)
+        self.assertNotIn("\r", "".join(blocks))
+        for block in blocks:
+            self.assertLessEqual(text_width(block), 10)
+
+    def test_astral_characters_are_counted_as_one(self):
+        # 補助面の文字 (𠀋 や 𝕏) はコードポイント 1 個として数える
+        text = ("𠀋" * 40) + "。" + ("𝕏" * 40)
+        blocks = split_text(text, limit=20)
+        self.assertEqual("".join(blocks), text)
+        for block in blocks:
+            self.assertLessEqual(text_width(block), 20)
+
+    def test_describe_blocks(self):
+        rows = describe_blocks(["あい", "うえお"])
+        self.assertEqual(rows, [(1, 2.0, "あい"), (2, 3.0, "うえお")])
+
+    def test_char_width_modes(self):
+        self.assertEqual(char_width("あ"), 1.0)
+        self.assertEqual(char_width("a"), 1.0)
+        self.assertEqual(char_width("あ", "halfwidth_half"), 1.0)
+        self.assertEqual(char_width("a", "halfwidth_half"), 0.5)
+
+
+class BalanceTailTest(unittest.TestCase):
+    def test_merge_restores_the_space_between_words(self):
+        # 連結しただけだと "wordtail" のように単語が繋がる
+        merged = _balance_tail(["word", "tail"], 140, 0.55, "codepoints")
+        self.assertEqual(merged, ["word tail"])
+
+    def test_merge_does_not_insert_space_into_japanese(self):
+        merged = _balance_tail(["完了しました。", "以上です。"], 140, 0.55, "codepoints")
+        self.assertEqual(merged, ["完了しました。以上です。"])
+
+    def test_existing_newline_is_kept_as_the_separator(self):
+        merged = _balance_tail(["word" + NL, "tail"], 140, 0.55, "codepoints")
+        self.assertEqual(merged, ["word" + NL + "tail"])
+
+    def test_long_enough_tail_is_left_alone(self):
+        blocks = ["あ" * 60, "い" * 60]
+        self.assertEqual(_balance_tail(blocks, 140, 0.55, "codepoints"), blocks)
+
+
+class PerformanceTest(unittest.TestCase):
+    def test_long_text_is_split_quickly(self):
+        """候補列挙が残り全文に対して走ると O(n^2) になり数十秒かかる."""
+        base = "実装が完了しました。設定ファイルを読み込み、音声へ変換します。"
+        text = (base * 500)[:30000]
+        started = time.monotonic()
+        blocks = split_text(text)
+        elapsed = time.monotonic() - started
+        self.assertGreater(len(blocks), 100)
+        self.assertLess(elapsed, 5.0, f"30,000 文字の分割に {elapsed:.1f} 秒かかった")
 
 
 if __name__ == "__main__":
