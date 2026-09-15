@@ -24,7 +24,11 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
+
+from .logging_util import get_logger
+
+log = get_logger("splitter")
 
 # ---------------------------------------------------------------------------
 # 優先度
@@ -97,7 +101,7 @@ def _script_of(ch: str) -> str:
     code = ord(ch)
     if 0x3040 <= code <= 0x309F:
         return "hira"
-    if 0x30A0 <= code <= 0x30FF or code == 0xFF70 or 0xFF66 <= code <= 0xFF9D:
+    if 0x30A0 <= code <= 0x30FF or 0xFF66 <= code <= 0xFF9D:
         return "kata"
     if 0x4E00 <= code <= 0x9FFF or 0x3400 <= code <= 0x4DBF or ch == "々":
         return "kanji"
@@ -111,6 +115,9 @@ def _script_of(ch: str) -> str:
 # ---------------------------------------------------------------------------
 # 文字幅
 # ---------------------------------------------------------------------------
+WIDTH_MODES = ("codepoints", "halfwidth_half")
+
+
 def char_width(ch: str, mode: str = "codepoints") -> float:
     """1 文字ぶんのカウント値.
 
@@ -215,7 +222,7 @@ def _sentence_end_pos(text: str, index: int) -> Optional[int]:
             return None
         if prev_ch and WORDISH.match(prev_ch) and len(prev_ch.encode()) == 1 and index >= 2:
             # "e.g." のような略記: 直前が 1 文字の英字なら文末としない
-            if text[index - 2] in ".·・ " or (index >= 2 and text[index - 2] == "."):
+            if text[index - 2] in ".·・ ":
                 return None
     pos = index + 1
     while pos < len(text) and (text[pos] in SENTENCE_ENDS or text[pos] in TRAILERS):
@@ -343,6 +350,9 @@ def split_text(
     """
     if limit <= 0:
         raise ValueError("limit must be positive")
+    if width_mode not in WIDTH_MODES:
+        # 黙って codepoints 相当で動かすと、数え方の違いに気づけない
+        raise ValueError(f"width_mode must be one of {WIDTH_MODES}: {width_mode!r}")
 
     text = text.strip()
     if not text:
@@ -397,10 +407,12 @@ def split_text(
         for block in blocks:
             if _speakable(block):
                 kept.append(block)
-            elif kept:
-                merged = kept[-1] + block
-                if text_width(merged, width_mode) <= limit:
-                    kept[-1] = merged
+                continue
+            merged = kept[-1] + block if kept else ""
+            if merged and text_width(merged, width_mode) <= limit:
+                kept[-1] = merged
+            else:
+                log.debug("記号のみのブロックを捨てました: %r", block)
         blocks = kept
 
     return blocks
@@ -415,9 +427,14 @@ def _balance_tail(
         return blocks
 
     # split_text() は境界で lstrip() しているため、そのまま連結すると
-    # "word" + "tail" が "wordtail" になる。区切りとして改行を入れ直す。
-    separator = "" if blocks[-2].endswith("\n") else "\n"
-    merged = blocks[-2] + separator + tail
+    # "word" + "tail" が "wordtail" になる。半角語どうしが隣り合う場合だけ、
+    # 失われた空白を戻す (日本語の境界には元から空白が無いので入れない)。
+    head = blocks[-2]
+    if head.endswith("\n") or not (WORDISH.match(head[-1]) and WORDISH.match(tail[0])):
+        separator = ""
+    else:
+        separator = " "
+    merged = head + separator + tail
     if text_width(merged, width_mode) <= limit:
         return blocks[:-2] + [merged]
 
