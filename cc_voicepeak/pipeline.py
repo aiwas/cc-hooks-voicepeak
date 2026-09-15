@@ -192,7 +192,10 @@ def speak(
 
         if concat_mode and wavs:
             dest = Path(out_path) if out_path else synth.work_dir / "speech.wav"
-            report.output = concat_wavs(wavs, dest)
+            try:
+                report.output = concat_wavs(wavs, dest)
+            except (CcVoicepeakError, OSError) as exc:
+                log.warning("wav の連結に失敗しました: %s", exc)
             if out_path is None and report.output is not None:
                 try:
                     active_player.start()
