@@ -5,11 +5,20 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (345 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (346 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
+
+# 下限バージョンでの確認とパッケージング (uv)
+uv run --no-project --python 3.9 python -m unittest discover -s tests -t .
+uv build                                     # sdist + wheel を dist/ へ
 ```
+
+`requires-python` の下限は 3.9 なので、文法と標準ライブラリだけで判断せず
+`uv run --python 3.9` で実際に通しておく（手元の既定は 3.13）。
+`uv build` は `[build-system]` を見て setuptools を隔離環境へ取得するため、
+環境に setuptools や pip を入れておく必要はない。
 
 依存パッケージは追加しない方針（Python 3.9+ 標準ライブラリのみ）。
 `tests/fake_voicepeak.py` が本物と同じオプションを受け取り、140 文字超でエラーを返す

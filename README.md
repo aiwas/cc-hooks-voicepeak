@@ -31,7 +31,8 @@ cd ~/src/cc-hooks-voicepeak
 ./bin/cc-voicepeak check --notes  # WSL 連携の注意点を表示
 ```
 
-`pip install -e .` でもインストールできる（`cc-voicepeak` コマンドが使えるようになる）。  
+`pip install -e .`（または `uv pip install -e .`）でもインストールできる
+（`cc-voicepeak` コマンドが使えるようになる）。  
 インストールしなくても `bin/cc-voicepeak` をそのまま実行できる。
 
 ### 2. voicepeak.exe の場所を教える
@@ -211,10 +212,21 @@ JSON にはコメントを書けず、`$comment` のような独自キーは `ch
 ## 開発
 
 ```bash
-python3 -m unittest discover -s tests -t .
+python3 -m unittest discover -s tests -t .                                    # テスト全件
+uv run --no-project --python 3.9 python -m unittest discover -s tests -t .    # 下限の 3.9 で実行
 ```
 
 Windows も VOICEPEAK も無い環境でも全件実行できる。
+
+配布物を作る場合は `uv build`。`[build-system]` を見て setuptools を隔離環境へ
+取得するので、環境に setuptools や pip を入れておく必要はない。
+
+```bash
+uv build          # dist/ に sdist と wheel
+uv run --no-project --with dist/cc_hooks_voicepeak-0.1.0-py3-none-any.whl \
+  cc-voicepeak --version
+```
+
 設計や内部構造は [CLAUDE.md](CLAUDE.md) を参照。
 
 ## ライセンス
