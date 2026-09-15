@@ -1,5 +1,4 @@
 {
-  "$comment": "Claude Code の .claude/settings.json にマージする例。Stop でタスク完了を、Notification で許可待ちを読み上げる。",
   "hooks": {
     "Stop": [
       {

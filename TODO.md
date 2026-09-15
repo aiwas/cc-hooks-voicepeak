@@ -22,9 +22,6 @@
   `Programming Language :: Python :: 3.9` 系の細目 classifier が無い。
   `license = { file = "LICENSE" }` と `License ::` classifier の併用は
   setuptools>=77 で非推奨（`license = "MIT"` + `license-files` へ）
-- **`examples/settings.json:2`** トップレベルの `"$comment"` は Claude Code の settings
-  スキーマが警告する可能性がある（未検証。手元に参照できるスキーマが無い）。
-  コピー元として配布するファイルなのでコメントは README 側に置く方が安全
 
 ---
 

@@ -1,6 +1,4 @@
 {
-  "$comment": "cc-voicepeak の設定例。.claude/voicepeak.json か ~/.config/cc-voicepeak/config.json に置く。",
-
   "voicepeak": {
     "exe": "/mnt/c/Program Files/VOICEPEAK/voicepeak.exe",
     "narrator": "Miyamai Moca",

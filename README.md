@@ -75,6 +75,8 @@ cc-voicepeak install-hook --command '/opt/x/cc-voicepeak hook'   # コマンド�
 
 スニペット本体は標準出力、案内文は標準エラーに出るので、`> snippet.json` でそのまま保存できる。  
 表示された内容を `.claude/settings.json`（プロジェクト単位）か `~/.claude/settings.json`（全体）にマージする。
+同じ内容を `examples/settings.json` にも置いてある（`Stop` でタスク完了を、`Notification` で
+許可待ちを読み上げる形）。コピー元として使えるように、説明のコメントはファイルに入れていない。
 
 ```json
 {
@@ -165,6 +167,10 @@ $ ./bin/cc-voicepeak split -f notes.md
 5. 環境変数（`CC_VOICEPEAK_EXE` `CC_VOICEPEAK_NARRATOR` `CC_VOICEPEAK_PLAYER` など）
 6. `--config PATH` で指定したファイル
 7. コマンドライン引数
+
+`examples/voicepeak.json` が主要なキーを埋めた設定例で、2 か 3 の場所へそのまま置ける。
+JSON にはコメントを書けず、`$comment` のような独自キーは `check` が
+「既定値に無いキーです」と WARN を出すため、サンプルには説明を入れていない。
 
 よく使うキーは以下。全項目は `cc-voicepeak check --print-config` で確認できる。
 
