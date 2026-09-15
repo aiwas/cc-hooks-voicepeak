@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (266 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (282 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -154,6 +154,21 @@ while ($true) {
 PATH を探し、無ければ `POWERSHELL_FALLBACKS` の既定インストール先を見る
 （`appendWindowsPath=false` でも動くように）。それでも見つからなければ
 `backend="auto"` は WSL 側の `paplay` などへ落ちる。無言で無音にはしない。
+
+`SoundPlayer` には音量の API が無いので **`player.volume` はこの経路では効かない**。
+`check` が WARN で知らせる。音量を変えたい場合は `paplay` / `ffplay` を選ぶ。
+
+後始末は `_release()` に集約してある（`kill` → `wait` → reader スレッドの `join`
+→ パイプの `close`）。`wait()` を呼ばずに参照を捨てるとゾンビが残り fd もリークする。
+PID 行の待機中はプロセスの生存も見る。PID が取れないと `taskkill` による割り込みが
+できなくなるうえ、起動に失敗した場合に既定 20 秒ブロックしてしまうため。
+
+`CommandPlayer` 側は再生 1 件ごとに「再生時間 × 2 + `PLAYBACK_TIMEOUT_MARGIN`」で
+打ち切る。`aplay` がデバイス待ちで止まると常駐プロセスが永久に残るため。
+ワーカスレッドは例外で終了させない（静かに止まると以降の `enqueue()` が無反応になる）。
+
+テストは `tests/fake_player.py` を `executable` に渡して、標準入力プロトコル
+（PID 行 / wav パス / `__QUIT__`）を実際に動かして確認している。
 WSLg で PulseAudio が使える環境なら `player.backend` に `paplay` / `aplay` / `ffplay`
 も選べる（`CommandPlayer`。WSL 側で完結する）。
 

@@ -11,22 +11,6 @@
 
 ## 優先度: 中
 
-### プロセス・再生
-
-- **`player.py:198`** `stop()` が `wait()` を呼ばずに参照を捨てるためゾンビが残り、
-  `stdin`/`stdout` の fd もリークする。`kill()` → `wait(timeout=5)` → パイプ `close()`
-  → reader スレッドの `join` まで行う
-- **`player.py:142`** PID 待ちが 20 秒ブロックし、powershell.exe が即死しても
-  `_win_pid=None` のまま成功扱いで戻る。以降 `taskkill` による割り込みが不可能になる。
-  待機ループ内で `self.proc.poll()` を確認する
-- **`player.py:265`** `CommandPlayer` に再生タイムアウトが無い。`finish()` は
-  `join(timeout=None)`、ワーカ内の `wait()` にも timeout が無く、`aplay` がデバイス待ちで
-  停止すると常駐プロセスが永久に残る
-- **`player.py:281`** `player.volume` が powershell バックエンドに渡らず、WSL 既定経路では
-  設定しても効果がない。`SoundPlayer` では音量制御できない旨を `check` で警告する
-- **`player.py:244`** ワーカスレッドが `PlayerError` で静かに停止し、以降の `enqueue()` が
-  無反応になる
-
 ### 合成・ロック
 
 - **`synth.py:201`** キャッシュ書き込みが非アトミック。並行プロセスが
@@ -88,7 +72,7 @@
 
 ## テストの穴
 
-以下は 1 件も検証されていない（2026-09-15 時点、テストは 266 件）。
+以下は 1 件も検証されていない（2026-09-15 時点、テストは 282 件）。
 
 ### 未検証のモジュール
 
@@ -98,10 +82,6 @@
 - **`wavutil.py` に専用テストが無い** — フォーマット不一致、`gap_seconds`、
   読めないソース、空リスト、`write_silence`。`write_silence()` で異フォーマットの wav を
   生成すれば依存を足さずに単体テストが書ける
-- **`PowershellPlayer` / `CommandPlayer` の実動作** — `tests/test_bridge.py:155` は
-  スクリプト文字列とバックエンド選択のみ。PID 行のパース、`__QUIT__` 送出、
-  `stop()` 後の状態、paplay の音量スケーリングが未検証。`fake_voicepeak.py` と同様の
-  偽プレイヤスクリプトを置けば標準入力プロトコル全体を検証できる
 
 ### 未検証の分岐
 

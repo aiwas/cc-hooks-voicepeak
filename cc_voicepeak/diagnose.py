@@ -53,7 +53,7 @@ def _command_player_check(backend: str) -> CheckItem:
     )
 
 
-def _player_check(backend: str, bridge: Bridge) -> CheckItem:
+def _player_check(backend: str, bridge: Bridge, volume: Optional[int] = None) -> CheckItem:
     """``player.backend`` の設定に対して、実際に使える再生手段があるかを見る."""
     if backend == "none":
         return CheckItem("再生 (none)", OK, "再生せず合成だけ行います")
@@ -63,6 +63,14 @@ def _player_check(backend: str, bridge: Bridge) -> CheckItem:
     if backend == "powershell" or (backend == "auto" and bridge.name == "wsl"):
         found = find_powershell()
         if found:
+            if volume is not None:
+                # SoundPlayer には音量の API が無い
+                return CheckItem(
+                    "再生 (powershell.exe)",
+                    WARN,
+                    f"{found} (player.volume は無視されます)",
+                    "音量を変えるには player.backend を paplay か ffplay にしてください",
+                )
             return CheckItem("再生 (powershell.exe)", OK, found)
         if backend == "powershell":
             return CheckItem(
@@ -172,7 +180,7 @@ def run_checks(cfg: Config, do_synth: bool = False) -> List[CheckItem]:
 
     # 4. 再生系
     backend = str(cfg.get("player.backend", "auto"))
-    player_item = _player_check(backend, bridge)
+    player_item = _player_check(backend, bridge, cfg.get("player.volume"))
     items.append(player_item)
     if do_synth and player_item.status == OK and player_item.name.startswith("再生 (powershell"):
         # 実際に 1 回起動してみる (--synth のときだけ。起動に 1 秒ほどかかる)
