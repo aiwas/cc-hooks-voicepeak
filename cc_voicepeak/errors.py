@@ -17,5 +17,13 @@ class SynthError(CcVoicepeakError):
     """voicepeak.exe の実行失敗."""
 
 
+class LockTimeout(SynthError):
+    """EXE の直列化ロックを取得できなかった.
+
+    voicepeak は同時起動できないため、ロックを取れないまま合成に進んではいけない。
+    再試行しても待ち時間が伸びるだけなので、合成失敗として扱う。
+    """
+
+
 class PlayerError(CcVoicepeakError):
     """再生の失敗."""

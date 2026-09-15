@@ -234,7 +234,10 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
 ### 合成と再生
 
 - ブロックごとに `voicepeak.exe -s <text> -o <win path>` を **直列**に起動
-  （同時起動不可のため、ホスト全体で `flock` を取る。`locking.ExeLock`）
+  （同時起動不可のため、ホスト全体で `flock` を取る。`locking.ExeLock`）。
+  ロックを取れないまま合成に進むと同時起動になるので、タイムアウトは
+  `LockTimeout`（`SynthError` のサブクラス）にして合成失敗として扱う。
+  再試行しても待ち時間が伸びるだけなので、このときはリトライしない
 - 成功した wav を即プレイヤへ流し込む（`player.concat: true` なら `wavutil` で
   1 本に連結してから再生。無音の継ぎ目が完全に消える）
 - 同じ文面＋同じ声の wav は SHA-1 キーでキャッシュ再利用（`voicepeak.cache`）。
@@ -253,7 +256,11 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
   並べる（順序を間違えると argparse が `unrecognized arguments` で終了する）
 - セッションごとの状態は `SpeechSlot`（ランタイムディレクトリの JSON）に持ち、
   `hook.on_busy` に応じて `replace`（前を taskkill して割り込む）/ `queue`（待つ）/
-  `skip`（捨てる）を切り替える
+  `skip`（捨てる）を切り替える。この判定と書き込みは `SpeechSlot.acquire()` が
+  セッション単位の `flock` の中で行う（空き確認と書き込みが分かれていると、
+  その隙に別プロセスが確保して読み上げが重なる）
+- 割り込みで kill する前に、状態ファイルへ記録した `/proc/<pid>/stat` の starttime と
+  照合する。PID が再利用されていた場合に無関係なプロセスグループを止めないため
 - **読み上げの失敗で Claude Code の作業を止めない。** `cli.main()` は
   `KeyboardInterrupt` 以外のすべての例外を捕まえ、`hook` サブコマンドのときは 0 を返す。
   `--sync` / `hook.detach: false` の経路も、`cmd_speak()` が非 0 を返したら警告ログに
