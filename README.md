@@ -8,6 +8,7 @@ Claude Code は WSL、VOICEPEAK は Windows という構成を前提にしてい
 - VOICEPEAK の「1 回 140 文字まで」という制約を、自然な区切りでの自動分割で吸収する
 - hook は即座に終了するので、読み上げが長くても Claude Code の会話は止まらない
 - 依存パッケージなし（Python 3.9 以上の標準ライブラリのみ）
+- Claude Code のプラグインとして入れられる（`settings.json` の編集が不要）
 
 実装の詳細や設計の背景は [CLAUDE.md](CLAUDE.md) にまとめてある。
 
@@ -62,6 +63,34 @@ export CC_VOICEPEAK_EXE='/mnt/c/Program Files/VOICEPEAK/voicepeak.exe'
 気に入った設定は `.claude/voicepeak.json` に書いておく（`examples/voicepeak.json` 参照）。
 
 ### 4. Hook を登録する
+
+登録の方法は 2 つある。プラグインとして入れるのが手軽で、`settings.json` を
+自分で編集したい場合は従来どおりスニペットも使える。
+
+#### A. プラグインとして入れる（手軽）
+
+```
+/plugin marketplace add aiwas/cc-hooks-voicepeak
+/plugin install voicepeak@cc-hooks-voicepeak
+```
+
+これだけで `Stop` / `Notification` / `SubagentStop` の hook が登録され、
+`/voicepeak:check` `/voicepeak:speak` `/voicepeak:split` が使えるようになる。
+`settings.json` は触らない。
+
+手元の clone をそのまま読ませることもできる。
+
+```bash
+claude --plugin-dir /path/to/cc-hooks-voicepeak
+```
+
+声や `voicepeak.exe` のパスは、プラグインで入れた場合も設定ファイル
+（`.claude/voicepeak.json` など、後述の「設定」を参照）で指定する。
+
+`SubagentStop` は hook としては登録されるが、既定では読み上げない。
+サブエージェントの完了も読ませたい場合は設定の `hook.subagent` を `true` にする。
+
+#### B. settings.json に手で登録する
 
 ```bash
 ./bin/cc-voicepeak install-hook                    # settings.json 用のスニペットを表示
@@ -131,6 +160,14 @@ cc-voicepeak narrators                       声の一覧
 cc-voicepeak emotions <名前>                 感情パラメータの一覧
 cc-voicepeak install-hook                    settings.json スニペット
 ```
+
+プラグインとして入れた場合は、Claude Code から直接叩けるコマンドも使える。
+
+| コマンド            | 内容                                             |
+| ------------------- | ------------------------------------------------ |
+| `/voicepeak:check`  | 環境診断。`--synth` を渡すと実際に 1 回合成する  |
+| `/voicepeak:speak`  | 渡したテキストを読み上げる                       |
+| `/voicepeak:split`  | 分割結果だけ確認する（合成しない）               |
 
 共通オプション（サブコマンドの前に置く）:
 

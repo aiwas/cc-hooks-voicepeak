@@ -349,6 +349,47 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
   `--sync` / `hook.detach: false` の経路も、`cmd_speak()` が非 0 を返したら警告ログに
   落として 0 で終わる。`hook` 以外のサブコマンドは通常どおり 1 を返す
 
+## プラグインとしての配布
+
+リポジトリ自身がプラグイン本体であり、同時にマーケットプレイスでもある
+（`marketplace.json` の `source` が `"./"`）。追加したファイルは以下。
+
+| ファイル | 役割 |
+|---|---|
+| `.claude-plugin/plugin.json` | プラグインのマニフェスト。名前は `voicepeak` |
+| `.claude-plugin/marketplace.json` | 自リポジトリを `/plugin marketplace add` の対象にする |
+| `hooks/hooks.json` | `Stop` / `Notification` / `SubagentStop` の登録 |
+| `commands/*.md` | `/voicepeak:check` `/voicepeak:speak` `/voicepeak:split` |
+
+`hooks/hooks.json` と `commands/` は**規約で自動的に読まれる**ため、`plugin.json` に
+`hooks` / `commands` キーを書く必要はない（書くのは既定以外の場所に置く場合だけ）。
+
+hook のコマンドは `"${CLAUDE_PLUGIN_ROOT}/bin/cc-voicepeak" hook`。
+`bin/cc-voicepeak` は自分の位置から `PYTHONPATH` を通すので、cwd がどこでも動く。
+プラグインの `bin/` は PATH にも追加されるが、依存しないほうが確実なので
+絶対パスで書いている。
+
+`SubagentStop` は hooks.json では登録するが、`hook.subagent` が既定の `false` の
+うちは `resolve_text()` が即スキップする。設定だけで有効にできるようにするため、
+登録自体は常に行う。
+
+変更したら検証すること。`commands/` のフロントマターや JSON の綴りもここで落ちる。
+
+```bash
+claude plugin validate .                          # marketplace.json
+claude plugin validate .claude-plugin/plugin.json # plugin.json と同梱物
+claude plugin validate commands                   # コマンド定義
+```
+
+`plugin.json` の検証では「CLAUDE.md at the plugin root is not loaded as project
+context」という WARN が出るが、これは**意図どおり**。この CLAUDE.md は開発者向けの
+技術メモであって、利用者へ配る文脈ではない。`--strict` を CI に入れる場合は
+この 1 件が引っかかることを踏まえること。
+
+配布名を変えるときは `plugin.json` の `name`、`marketplace.json` の `plugins[].name`、
+README のインストール手順、`commands/*.md` の相互参照（`/voicepeak:check` など）を
+揃えて直す。
+
 ## 設定の仕組み
 
 `config.py` の `DEFAULTS` が設定側の既定値定義（`normalize.DEFAULT_OPTIONS` とは別）。
