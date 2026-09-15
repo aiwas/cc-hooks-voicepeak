@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (298 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (316 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -288,7 +288,13 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
   `LockTimeout`（`SynthError` のサブクラス）にして合成失敗として扱う。
   再試行しても待ち時間が伸びるだけなので、このときはリトライしない
 - 成功した wav を即プレイヤへ流し込む（`player.concat: true` なら `wavutil` で
-  1 本に連結してから再生。無音の継ぎ目が完全に消える）
+  1 本に連結してから再生。無音の継ぎ目が完全に消える）。
+  読めない wav やフォーマットの違う wav は飛ばして続行し、一時ファイルへ書いてから
+  差し替えるので、失敗しても中途半端な出力が残らない。壊れた wav は
+  `wave.Error` だけでなく `EOFError` / `RuntimeError` でも来るので `WAVE_ERRORS` で受ける
+- `wav_duration()` はヘッダの `nframes` を実ファイルサイズで頭打ちにする。
+  途中で切れた wav がヘッダどおりの秒数を主張すると、`CommandPlayer` の再生打ち切りや
+  `finish()` の待ち時間がその嘘を根拠にしてしまう
 - 同じ文面＋同じ声の wav は SHA-1 キーでキャッシュ再利用（`voicepeak.cache`）。
   「テストは全部で〜」のような定型句が多い Claude の応答では効果が出やすい。
   書き込みは一時名 → `os.replace` で行う（直接コピーすると、並行プロセスが

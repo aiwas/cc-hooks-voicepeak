@@ -16,16 +16,6 @@
 - **`logging_util.py:53`** hook プロセスとデタッチされた読み上げプロセスが同一ファイルへ
   同時に書くが、`RotatingFileHandler` はプロセス間ロックを持たない
 
-### wav
-
-- **`wavutil.py:55`** `except wave.Error` では壊れた wav の例外を捕捉しきれない
-  （実測で `RuntimeError` が素通り。3.9 では `EOFError` も想定）。
-  `pipeline.py:195` も `KeyboardInterrupt` しか捕捉していない
-- **`wavutil.py:28`** docstring は「1 件でも読めれば dest を返す」だが、実際は 1 件でも
-  異常があれば `PlayerError` で中断し、中途半端な dest が残る
-- **`wavutil.py:18`** `wav_duration()` がヘッダの `nframes` だけを見るため、
-  truncated wav に対して嘘の秒数を返す（`player.py:179` の再生時間計算がずれる）
-
 ### その他
 
 - **`transcript.py:74`** 直近 400 件を見るためだけに JSONL 全体をメモリへ読む。
@@ -39,10 +29,6 @@
 - **`logging_util.py:50`** `log.level=off` でもログファイルとディレクトリが作られる
 - **`synth.py:129`** 一時領域が `/mnt/c/Windows/Temp` になった場合、`cache/<sha1>.wav` が
   予測可能な名前で他ユーザから書き換え可能な場所に置かれる
-- **`wavutil.py:50`** 無音挿入の判定が `path is not usable[-1]` という同一性比較。
-  無音バイト数もフレーム境界に揃わない可能性がある
-- **`wavutil.py:21,39,67`** `contextlib.closing` は不要（`wave.open` は 3.4 以降
-  コンテキストマネージャ対応）
 - **`pipeline.py:139`** 空入力時に `report.elapsed` が設定されず `summary()` が不正確
 - **`pyproject.toml`** `[project.urls]` と `Operating System ::` /
   `Programming Language :: Python :: 3.9` 系の細目 classifier が無い。
@@ -58,13 +44,10 @@
 
 ## テストの穴
 
-以下は 1 件も検証されていない（2026-09-15 時点、テストは 298 件）。
+以下は 1 件も検証されていない（2026-09-15 時点、テストは 316 件）。
 
 ### 未検証のモジュール
 
-- **`wavutil.py` に専用テストが無い** — フォーマット不一致、`gap_seconds`、
-  読めないソース、空リスト、`write_silence`。`write_silence()` で異フォーマットの wav を
-  生成すれば依存を足さずに単体テストが書ける
 
 ### 未検証の分岐
 
