@@ -29,6 +29,36 @@ log = get_logger("synth")
 # PID 再利用や別ディストロとの PID 衝突で消し損ねないための保険。
 WORK_DIR_MAX_AGE = 6 * 3600
 
+# リトライの待ち時間 (秒)。試行ごとに倍にして上限で頭打ちにする。
+RETRY_BACKOFF = 0.5
+RETRY_BACKOFF_MAX = 3.0
+
+# 再試行しても解消しない失敗 (文字数超過など)
+_PERMANENT_ERROR = re.compile(r"too long|too many|文字数|上限", re.I)
+
+
+def _is_permanent(exc: SynthError) -> bool:
+    return bool(_PERMANENT_ERROR.search(str(exc)))
+
+
+def redact_command(command: Sequence[str]) -> List[str]:
+    """``-s`` の値を長さとハッシュに置き換えたコマンド表現.
+
+    そのまま出すと ``log.level=debug`` でアシスタント応答の全文が
+    ログファイルに平文で蓄積される。
+    """
+    out: List[str] = []
+    redact_next = False
+    for token in command:
+        if redact_next:
+            digest = hashlib.sha1(token.encode("utf-8")).hexdigest()[:8]
+            out.append(f"<{len(token)}文字 sha1:{digest}>")
+            redact_next = False
+            continue
+        out.append(token)
+        redact_next = token in ("-s", "--say")
+    return out
+
 # 改行以外の制御文字 (voicepeak に渡すと落ちる可能性がある)
 _CONTROL_CHARS = "".join(
     chr(code)
@@ -194,6 +224,25 @@ class Synthesizer:
         digest = hashlib.sha1(f"{self.params.key()} {text}".encode("utf-8")).hexdigest()
         return self.cache_dir / f"{digest}.wav"
 
+    def _store_cache(self, text: str, source: Path) -> None:
+        """合成した wav をキャッシュへ置く.
+
+        直接コピーすると、並行プロセスが書きかけ (``st_size > 44`` を満たす)
+        の wav を読み、途中までの音声を再生し得る。同一ディレクトリの一時名へ
+        書いてから :func:`os.replace` で差し替える。
+        """
+        dest = self._cache_path(text)
+        tmp = dest.with_name(f"{dest.stem}.{os.getpid()}.tmp")
+        try:
+            shutil.copyfile(source, tmp)
+            os.replace(tmp, dest)
+        except OSError as exc:
+            log.debug("キャッシュの書き込みに失敗しました: %s", exc)
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
     def prune_cache(self) -> None:
         if not self.use_cache or self.cache_max_files <= 0:
             return
@@ -210,6 +259,23 @@ class Synthesizer:
                 pass
 
     # -- 合成 --------------------------------------------------------------
+    def _attempt_modes(self, text: str) -> List[str]:
+        """試行するモードの並びを返す (``retries + 1`` 件).
+
+        以前は fallback だけを ``retries`` 回繰り返しており、元のモードが
+        再試行されなかった。``say`` と ``text_file`` を交互に使う。
+        """
+        if text.startswith("-"):
+            # -s の値がオプションと誤認されるので text_file に固定する
+            return ["text_file"] * (self.retries + 1)
+
+        primary = self.input_mode
+        other = "say" if primary == "text_file" else "text_file"
+        modes = [primary]
+        while len(modes) <= self.retries:
+            modes.append(other if len(modes) % 2 else primary)
+        return modes
+
     def synth_block(self, index: int, text: str, out_path: Optional[Path] = None) -> SynthResult:
         prepared = prepare_block(text)
         if not prepared:
@@ -236,17 +302,16 @@ class Synthesizer:
                 except OSError:
                     pass
 
-        modes = [self.input_mode]
-        fallback = "text_file" if self.input_mode == "say" else "say"
-        modes += [fallback] * self.retries
-        if prepared.startswith("-"):
-            # -s の値がオプションと誤認されるのを避ける
-            modes = ["text_file"] + [mode for mode in modes if mode != "text_file"]
+        modes = self._attempt_modes(prepared)
 
         last_error = "不明なエラー"
         command: Sequence[str] = ()
+        exhausted: set = set()
         started = time.monotonic()
         for attempt, mode in enumerate(modes):
+            if attempt:
+                # 一過性の失敗 (EXE の後始末待ちなど) に備えて少し待つ
+                time.sleep(min(RETRY_BACKOFF * 2 ** (attempt - 1), RETRY_BACKOFF_MAX))
             try:
                 command = self._run(prepared, target, mode)
             except LockTimeout as exc:
@@ -257,15 +322,24 @@ class Synthesizer:
             except SynthError as exc:
                 last_error = str(exc)
                 log.warning(
-                    "合成に失敗 #%d (mode=%s, 試行 %d): %s", index, mode, attempt + 1, exc
+                    "合成に失敗 #%d (mode=%s, 試行 %d/%d): %s",
+                    index,
+                    mode,
+                    attempt + 1,
+                    len(modes),
+                    exc,
                 )
+                if _is_permanent(exc):
+                    # 同じモードで繰り返しても無駄。ただし -s と -t で
+                    # 文字数の数え方が違う可能性があるので、別モードは試す
+                    exhausted.add(mode)
+                    if set(modes[attempt + 1 :]) <= exhausted:
+                        log.warning("どのモードでも解消しないため諦めます #%d", index)
+                        break
                 continue
             elapsed = time.monotonic() - started
             if self.use_cache:
-                try:
-                    shutil.copyfile(target, self._cache_path(prepared))
-                except OSError:
-                    pass
+                self._store_cache(prepared, target)
             return SynthResult(
                 index, prepared, target, elapsed=elapsed, success=True, command=command
             )
@@ -293,7 +367,7 @@ class Synthesizer:
             except OSError:
                 pass
 
-        log.debug("実行: %s", command)
+        log.debug("実行: %s", redact_command(command))
         try:
             with ExeLock():
                 proc = subprocess.run(
@@ -348,7 +422,15 @@ class Synthesizer:
                 )
         except (OSError, subprocess.SubprocessError) as exc:
             raise SynthError(f"voicepeak を実行できません: {exc}") from exc
-        return _decode(proc.stdout) or _decode(proc.stderr)
+        stdout = _decode(proc.stdout)
+        stderr = _decode(proc.stderr)
+        if proc.returncode != 0:
+            # 検査しないと list_narrators() がエラーメッセージを声の一覧として返す
+            raise SynthError(
+                f"voicepeak が異常終了しました (code={proc.returncode}): "
+                f"{(stderr or stdout).strip()[:300]}"
+            )
+        return stdout or stderr
 
     def check(self) -> str:
         return self._simple_run("--help")

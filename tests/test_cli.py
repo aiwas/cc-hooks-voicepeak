@@ -355,6 +355,36 @@ class ExitCodeTest(CliTestCase):
         self.assertIn("char_limit", proc.stderr.decode("utf-8"))
 
 
+class ExeLockTest(CliTestCase):
+    def test_voicepeak_is_not_launched_concurrently(self):
+        """ExeLock がホスト全体で直列化していることを 2 プロセスで確かめる."""
+        env = {
+            **self.env,
+            "FAKE_VOICEPEAK_LOCK": str(self.tmp / "exe.lock"),
+            "FAKE_VOICEPEAK_HANG": "0.3",
+        }
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-m", "cc_voicepeak", "speak", "--stdin"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                cwd=str(REPO),
+                env=env,
+            )
+            for _ in range(2)
+        ]
+        for index, proc in enumerate(procs):
+            proc.communicate(f"{index}番目の同時起動の確認です。".encode("utf-8"), timeout=120)
+
+        calls = self.recorded_calls()
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertFalse(
+            [call for call in calls if call.get("concurrent")],
+            "voicepeak.exe が同時起動している",
+        )
+
+
 class MiscCommandTest(CliTestCase):
     def test_install_hook_outputs_valid_json(self):
         proc = self.run_cli("install-hook", check=True)
