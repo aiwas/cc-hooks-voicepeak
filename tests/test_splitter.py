@@ -7,11 +7,14 @@ import unittest
 
 from cc_voicepeak.splitter import (
     PRIO_SENTENCE,
+    _balance_tail,
     can_break_at,
     find_break_points,
     split_text,
     text_width,
 )
+
+NL = chr(10)
 
 LONG_JA = (
     "実装が完了しました。まず設定ファイルを読み込む処理を追加し、"
@@ -145,6 +148,21 @@ class BreakPointTest(unittest.TestCase):
         blocks = split_text(text, limit=40)
         for block in blocks:
             self.assertLessEqual(text_width(block), 40)
+
+
+class BalanceTailTest(unittest.TestCase):
+    def test_merge_inserts_a_separator(self):
+        # 連結しただけだと "wordtail" のように単語が繋がる
+        merged = _balance_tail(["word", "tail"], 140, 0.55, "codepoints")
+        self.assertEqual(merged, ["word" + NL + "tail"])
+
+    def test_existing_newline_is_not_doubled(self):
+        merged = _balance_tail(["word" + NL, "tail"], 140, 0.55, "codepoints")
+        self.assertEqual(merged, ["word" + NL + "tail"])
+
+    def test_long_enough_tail_is_left_alone(self):
+        blocks = ["あ" * 60, "い" * 60]
+        self.assertEqual(_balance_tail(blocks, 140, 0.55, "codepoints"), blocks)
 
 
 class PerformanceTest(unittest.TestCase):

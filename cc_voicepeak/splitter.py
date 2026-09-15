@@ -414,7 +414,10 @@ def _balance_tail(
     if text_width(tail, width_mode) >= limit * 0.3:
         return blocks
 
-    merged = blocks[-2] + ("" if blocks[-2].endswith("\n") else "") + tail
+    # split_text() は境界で lstrip() しているため、そのまま連結すると
+    # "word" + "tail" が "wordtail" になる。区切りとして改行を入れ直す。
+    separator = "" if blocks[-2].endswith("\n") else "\n"
+    merged = blocks[-2] + separator + tail
     if text_width(merged, width_mode) <= limit:
         return blocks[:-2] + [merged]
 
