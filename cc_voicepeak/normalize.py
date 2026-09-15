@@ -112,20 +112,37 @@ def shorten_path(match: "re.Match[str]") -> str:
 
 
 def _remove_code_blocks(lines: List[str], mode: str, placeholder: str) -> List[str]:
+    """フェンスで囲まれたコードブロックを ``mode`` に従って処理する.
+
+    閉じフェンスが無いまま終わった場合は、コードブロックではなかったとみなして
+    本文へ戻す。フェンスを含むコード例や途中で切れた応答で、以降の本文が
+    まるごと消えるのを防ぐため。
+    """
     out: List[str] = []
+    buffered: List[str] = []
+    fence_at = -1
     in_fence = False
     for line in lines:
-        fence = _FENCE.match(line)
-        if fence:
-            in_fence = not in_fence
-            if in_fence and mode == "placeholder":
-                out.append(placeholder)
+        if _FENCE.match(line):
+            if in_fence:
+                in_fence = False
+                buffered = []
+                fence_at = -1
+            else:
+                in_fence = True
+                buffered = []
+                fence_at = len(out)
+                if mode == "placeholder" and placeholder:
+                    out.append(placeholder)
             continue
         if in_fence:
+            buffered.append(line)
             if mode == "read":
                 out.append(line)
             continue
         out.append(line)
+    if in_fence:
+        out = out[:fence_at] + buffered
     return out
 
 

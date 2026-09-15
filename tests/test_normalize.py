@@ -30,6 +30,21 @@ class NormalizeTest(unittest.TestCase):
         text = NL.join(["説明します。", "```", "print(1)", "```"])
         self.assertEqual(run(text, code_blocks="drop"), "説明します。")
 
+    def test_unclosed_fence_keeps_following_text(self):
+        text = NL.join(["前。", "```py", "code()", "まだ続く本文です。"])
+        result = run(text)
+        self.assertIn("前。", result)
+        self.assertIn("まだ続く本文です。", result)
+        self.assertNotIn("コードブロック", result)
+
+    def test_unclosed_fence_with_drop_mode(self):
+        text = NL.join(["前。", "```", "まだ続く本文です。"])
+        self.assertIn("まだ続く本文です。", run(text, code_blocks="drop"))
+
+    def test_code_fence_can_be_read(self):
+        text = NL.join(["説明します。", "```python", "print(1)", "```"])
+        self.assertIn("print(1)", run(text, code_blocks="read"))
+
     def test_inline_code_is_read_without_backticks(self):
         self.assertEqual(run("`split_text` を直しました。"), "split_text を直しました。")
 
