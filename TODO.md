@@ -9,17 +9,6 @@
 
 ---
 
-## 優先度: 高
-
-### 1. 割り込み時に作業ディレクトリが必ず残る — `synth.py:128` / `pipeline.py:208`
-
-`work_dir = <temp>/run/<pid>` の削除は `pipeline.speak` の `finally` にしかない。
-既定の `on_busy=replace` では対象プロセスが SIGKILL されるため実行されず、
-Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
-起動時に古い `run/*` を掃除する処理は存在しない。
-
----
-
 ## 優先度: 中
 
 ### プロセス・再生
@@ -78,7 +67,6 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 ## 優先度: 低
 
 - **`logging_util.py:50`** `log.level=off` でもログファイルとディレクトリが作られる
-- **`synth.py:128`** `work_dir` が PID のみで一意化されており、PID 再利用で衝突する
 - **`synth.py:129`** 一時領域が `/mnt/c/Windows/Temp` になった場合、`cache/<sha1>.wav` が
   予測可能な名前で他ユーザから書き換え可能な場所に置かれる
 - **`wavutil.py:50`** 無音挿入の判定が `path is not usable[-1]` という同一性比較。
@@ -100,13 +88,13 @@ Windows の `%TEMP%\cc-voicepeak\run\<pid>\*.wav` が無制限に蓄積する。
 
 ## テストの穴
 
-以下は 1 件も検証されていない（2026-09-15 時点、テストは 256 件）。
+以下は 1 件も検証されていない（2026-09-15 時点、テストは 266 件）。
 
 ### 未検証のモジュール
 
-- **`synth.py` に専用テストが無い** — キャッシュ命中、破損キャッシュのフォールバック、
-  `prune_cache`、モードのフォールバック順、タイムアウト、先頭 `-` の並べ替え、
-  `_decode` の cp932 経路
+- **`synth.py`** — `tests/test_synth.py` は作業ディレクトリの扱いのみ。キャッシュ命中、
+  破損キャッシュのフォールバック、`prune_cache`、モードのフォールバック順、
+  タイムアウト、先頭 `-` の並べ替え、`_decode` の cp932 経路が未検証
 - **`wavutil.py` に専用テストが無い** — フォーマット不一致、`gap_seconds`、
   読めないソース、空リスト、`write_silence`。`write_silence()` で異フォーマットの wav を
   生成すれば依存を足さずに単体テストが書ける

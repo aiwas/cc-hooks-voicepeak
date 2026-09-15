@@ -207,7 +207,9 @@ def speak(
         raise
     finally:
         synth.prune_cache()
-        if not keep_files and out_path is None:
+        # out_path を指定した場合、成果物は work_dir の外にあるので消してよい
+        # (ブロックごとの中間 wav が残り続けていた)
+        if out_path is not None or not keep_files:
             synth.cleanup()
 
     report.elapsed = time.monotonic() - started

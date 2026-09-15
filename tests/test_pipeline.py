@@ -194,6 +194,21 @@ class SpeakTest(PipelineTestCase):
         leftovers = list((self.tmp / "work" / "run").glob("*/*.wav"))
         self.assertEqual(leftovers, [])
 
+    def test_synth_to_file_leaves_no_intermediate_wav(self):
+        dest = self.tmp / "out" / "speech.wav"
+        synth_to_file(LONG_TEXT, self.config(), dest, bridge=self.bridge)
+        self.assertTrue(dest.exists())
+        leftovers = list((self.tmp / "work" / "run").glob("*/*.wav"))
+        self.assertEqual(leftovers, [], "ブロックごとの中間 wav が残っている")
+
+    def test_stale_work_dir_is_removed_on_next_run(self):
+        # on_busy=replace で SIGKILL された読み上げの残骸を模す
+        stale = self.tmp / "work" / "run" / "999999-stale"
+        stale.mkdir(parents=True)
+        (stale / "0001.wav").write_bytes(b"x" * 64)
+        speak(LONG_TEXT, self.config(), bridge=self.bridge)
+        self.assertFalse(stale.exists())
+
     def test_prepare_blocks_matches_synth_calls(self):
         cfg = self.config()
         blocks = prepare_blocks(LONG_TEXT, cfg)

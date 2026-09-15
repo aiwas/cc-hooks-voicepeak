@@ -92,7 +92,8 @@ class ExeLock:
             self.acquired = False
 
 
-def _pid_alive(pid: int) -> bool:
+def pid_alive(pid: int) -> bool:
+    """プロセスが生存しているか (他モジュールからも使う)."""
     try:
         os.kill(pid, 0)
         return True
@@ -121,7 +122,7 @@ def _is_recorded_process(pid: int, token: Optional[str]) -> bool:
     ``token`` が無い (古い状態ファイル) か ``/proc`` を読めない場合は、
     生存確認だけで妥協する。
     """
-    if not _pid_alive(pid):
+    if not pid_alive(pid):
         return False
     if token is None:
         return True
@@ -241,10 +242,10 @@ class SpeechSlot:
                         break
                 killed = True
                 for _ in range(20):
-                    if not _pid_alive(pid):
+                    if not pid_alive(pid):
                         break
                     time.sleep(0.05)
-                if not _pid_alive(pid):
+                if not pid_alive(pid):
                     break
 
         if killed:

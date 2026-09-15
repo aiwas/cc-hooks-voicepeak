@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (256 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (266 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -266,6 +266,10 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
   1 本に連結してから再生。無音の継ぎ目が完全に消える）
 - 同じ文面＋同じ声の wav は SHA-1 キーでキャッシュ再利用（`voicepeak.cache`）。
   「テストは全部で〜」のような定型句が多い Claude の応答では効果が出やすい
+- ブロックごとの wav は `<temp>/run/<pid>-<一意な接尾辞>/` に置き、`speak()` の
+  `finally` で消す。ただし `on_busy=replace` の割り込みでは SIGKILL されて
+  `finally` が走らないため、`Synthesizer` の生成時に `prune_work_dirs()` が
+  「プロセスが生きていない、または 6 時間より古い」ディレクトリを掃除する
 - `-s` で失敗したブロックは `-t <file>`（UTF-8・BOM 無し）で自動リトライ
 
 ## Hook の動作
