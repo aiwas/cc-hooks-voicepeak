@@ -138,5 +138,12 @@ class NormalizeTest(unittest.TestCase):
     def test_html_is_stripped(self):
         self.assertEqual(run("<b>強調</b>です。"), "強調です。")
 
+    def test_html_with_attributes_is_stripped(self):
+        self.assertEqual(run('<div class="x">本文</div>'), "本文")
+
+    def test_generic_type_is_not_stripped(self):
+        self.assertEqual(run("List<int> を返す。"), "List<int> を返す。")
+        self.assertEqual(run("Vec<T> に詰める。"), "Vec<T> に詰める。")
+
     def test_blank_lines_collapsed(self):
         self.assertEqual(run(NL.join(["前。", "", "", "後。"])), "前。" + NL + "後。")

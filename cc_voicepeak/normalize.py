@@ -34,7 +34,17 @@ _BOLD_ITALIC = re.compile(
 _CODE_MARK = "\x00"
 _CODE_REF = re.compile(r"\x00(\d+)\x00")
 _STRIKE = re.compile(r"~~(.+?)~~")
-_HTML_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
+# 既知のタグ名に限定する。`</?[A-Za-z]\w*>` だと List<int> や Vec<T> のような
+# 型表記まで削ってしまう。
+_HTML_TAG_NAMES = (
+    "a|abbr|article|aside|audio|b|blockquote|br|button|canvas|caption|cite|code|col"
+    "|colgroup|dd|del|details|div|dl|dt|em|embed|fieldset|figcaption|figure|footer"
+    "|form|h[1-6]|head|header|hr|html|i|iframe|img|input|ins|kbd|label|legend|li|main"
+    "|mark|nav|noscript|object|ol|optgroup|option|output|p|param|picture|pre|progress"
+    "|q|s|samp|script|section|select|small|source|span|strong|style|sub|summary|sup"
+    "|table|tbody|td|textarea|tfoot|th|thead|time|tr|track|u|ul|var|video|wbr"
+)
+_HTML_TAG = re.compile(rf"</?(?:{_HTML_TAG_NAMES})(?:\s[^<>]*)?/?>", re.I)
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
 _TOOL_MARKER = re.compile(r"^\s*(?:⏺|●|·|✓|✗|⎿)\s*")
 
