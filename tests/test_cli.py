@@ -437,6 +437,23 @@ class ExitCodeTest(CliTestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("char_limit", proc.stderr.decode("utf-8"))
 
+    def test_hook_with_misplaced_global_option_exits_zero(self):
+        # `hook -v` (グローバルオプションをサブコマンドの後ろに置く順序違い) は
+        # argparse が exit 2 にするが、Stop hook の exit 2 は「停止のブロック」になる
+        payload = {"hook_event_name": "Notification", "message": "テスト"}
+        proc = self.run_cli("hook", "-v", stdin=json.dumps(payload))
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode())
+        self.assertIn("unrecognized arguments", proc.stderr.decode("utf-8"))
+        self.assertFalse(self.calls.exists())
+
+    def test_hook_with_unknown_option_exits_zero(self):
+        proc = self.run_cli("hook", "--bogus", stdin="{}")
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode())
+
+    def test_argument_errors_outside_hook_keep_argparse_exit_code(self):
+        self.assertEqual(self.run_cli("speak", "--bogus").returncode, 2)
+        self.assertEqual(self.run_cli().returncode, 2)
+
 
 class ExeLockTest(CliTestCase):
     def test_voicepeak_is_not_launched_concurrently(self):

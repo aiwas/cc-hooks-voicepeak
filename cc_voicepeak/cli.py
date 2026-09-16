@@ -461,9 +461,29 @@ _COMMANDS = {
 }
 
 
+def _invoked_as_hook(argv: Optional[List[str]]) -> bool:
+    """引数解析に失敗した場合でも hook 起動かどうかを判定する。
+
+    `args.command` が得られないため生の argv を見る。
+    """
+    return "hook" in (sys.argv[1:] if argv is None else argv)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        # argparse は引数エラーで usage を標準エラーに出して exit 2 する。
+        # Claude Code は Stop / SubagentStop の exit 2 を「停止のブロック」と解釈し、
+        # 標準エラーを Claude への指示として流し込むため、hook 起動なら 0 に丸める
+        # (`hook -v` のような順序違いを install-hook --command で書いてしまった場合に
+        # 毎ターン停止できなくなるのを防ぐ)。--help / --version の 0 はそのまま返す
+        code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+        if code != 0 and _invoked_as_hook(argv):
+            print("警告: 引数の誤りで読み上げを中止しました (hook のため 0 で終了します)", file=sys.stderr)
+            return 0
+        return code
     handler = _COMMANDS[args.command]
     # hook から呼ばれている場合は、読み上げの失敗で Claude Code を止めない
     on_error = 0 if args.command == "hook" else 1

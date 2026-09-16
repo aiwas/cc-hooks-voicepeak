@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (366 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (369 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -379,7 +379,11 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
 - **読み上げの失敗で Claude Code の作業を止めない。** `cli.main()` は
   `KeyboardInterrupt` 以外のすべての例外を捕まえ、`hook` サブコマンドのときは 0 を返す。
   `--sync` / `hook.detach: false` の経路も、`cmd_speak()` が非 0 を返したら警告ログに
-  落として 0 で終わる。`hook` 以外のサブコマンドは通常どおり 1 を返す
+  落として 0 で終わる。`hook` 以外のサブコマンドは通常どおり 1 を返す。
+  argparse の引数エラー（`hook -v` の順序違いなど）も `SystemExit` を捕まえて
+  argv に `hook` が含まれていれば 0 にする。Claude Code は Stop / SubagentStop の
+  exit 2 を「停止のブロック」と解釈し、標準エラーの usage を Claude への指示として
+  渡してしまうため（`--help` / `--version` の 0 と `hook` 以外の 2 はそのまま）
 
 ## プラグインとしての配布
 
