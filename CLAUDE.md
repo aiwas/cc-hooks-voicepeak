@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (360 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (366 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -80,7 +80,7 @@ VOICEPEAK のコマンドラインには 2 つの厳しい制約がある。
 | `cc_voicepeak/player.py` | 常駐 PowerShell プレイヤ / WSL 側コマンド |
 | `cc_voicepeak/pipeline.py` | 整形→分割→合成→再生の接続 |
 | `cc_voicepeak/bridge.py` | WSL↔Windows のパス変換・EXE 探索・一時領域 |
-| `cc_voicepeak/fsutil.py` | ユーザ専用ディレクトリの用意と検査（`ensure_private_dir`） |
+| `cc_voicepeak/fsutil.py` | ユーザ専用ディレクトリの用意と検査（`ensure_private_dir`）、XDG パスの解決 |
 | `cc_voicepeak/locking.py` | EXE 直列化と割り込み制御 |
 | `cc_voicepeak/config.py` | 設定のマージと検証。既定値は `DEFAULTS` |
 | `cc_voicepeak/diagnose.py` | `check` サブコマンドの中身 |
@@ -360,8 +360,17 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
   `skip`（捨てる）を切り替える。この判定と書き込みは `SpeechSlot.acquire()` が
   セッション単位の `flock` の中で行う（空き確認と書き込みが分かれていると、
   その隙に別プロセスが確保して読み上げが重なる）
-- 割り込みで kill する前に、状態ファイルへ記録した `/proc/<pid>/stat` の starttime と
-  照合する。PID が再利用されていた場合に無関係なプロセスグループを止めないため
+- 割り込みで kill する前に、状態ファイルへ記録した `/proc/<pid>/stat` の starttime
+  （`pid_token`）と照合する。PID が再利用されていた場合に無関係なプロセスグループを
+  止めないため。`pid_token` の無い状態ファイルは古いものとして扱い、kill しない
+  （生存確認だけで信用すると `{"pid": <他人の pid>}` を置かれただけで kill が飛ぶ）。
+  `pid` は `type(pid) is int and pid > 1` で検査する（`isinstance` は `bool` も通す）
+- ランタイムディレクトリ（`locking.runtime_dir()`）は `$XDG_RUNTIME_DIR/cc-voicepeak`、
+  無ければログと同じ `$XDG_STATE_HOME/cc-voicepeak/run`。`/tmp` には落とさない。
+  作業ディレクトリと同じく `fsutil.ensure_private_dir()` で「シンボリックリンクでない・
+  所有者が自分・`0700`」を要求し、満たさなければ `RuntimeDirError` にして
+  読み上げ自体を諦める（他ユーザが状態ファイルや `voicepeak.lock` を置ける場所を
+  黙って使うと、割り込みが無関係なプロセスに飛んだり合成が `LockTimeout` で止まる）
 - hook プロセスとデタッチされた読み上げプロセスは**同じログファイルへ同時に書く**。
   素の `RotatingFileHandler` はプロセス間ロックを持たず、ローテーションが重なると
   `doRollover` が `FileNotFoundError` を投げて標準エラーを汚す。

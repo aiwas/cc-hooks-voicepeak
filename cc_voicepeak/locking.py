@@ -24,23 +24,41 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
-from .errors import LockTimeout
+from .errors import LockTimeout, RuntimeDirError
+from .fsutil import ensure_private_dir, xdg_state_home
 from .logging_util import get_logger
 
 log = get_logger("lock")
 
 
 def runtime_dir() -> Path:
-    base = os.environ.get("XDG_RUNTIME_DIR") or os.environ.get("TMPDIR") or "/tmp"
-    path = Path(base) / "cc-voicepeak"
-    path.mkdir(parents=True, exist_ok=True)
-    # XDG_RUNTIME_DIR が無い環境では /tmp/cc-voicepeak になるため、
-    # 状態ファイルを他ユーザから読まれないように明示的に絞る
+    """状態ファイルとロックの置き場所 (自分専用であることを保証する).
+
+    ``$XDG_RUNTIME_DIR/cc-voicepeak`` を使い、無ければログと同じ
+    ``$XDG_STATE_HOME/cc-voicepeak/run`` に落とす。``/tmp`` は使わない。
+    全ユーザ共有の場所だと、他ユーザが先に同名のディレクトリを作って
+    状態ファイルを置いたり ``voicepeak.lock`` を握り続けたりできる。
+    :func:`~.fsutil.ensure_private_dir` の検査に通らなければ
+    :class:`RuntimeDirError` にして続行しない。
+    """
+    base = os.environ.get("XDG_RUNTIME_DIR")
+    path = Path(base) / "cc-voicepeak" if base else xdg_state_home() / "cc-voicepeak" / "run"
     try:
-        path.chmod(0o700)
+        return ensure_private_dir(path)
     except OSError as exc:
-        log.debug("ランタイムディレクトリの権限を設定できません: %s", exc)
-    return path
+        raise RuntimeDirError(
+            f"ランタイムディレクトリを安全に用意できません: {exc}\n"
+            "XDG_RUNTIME_DIR か XDG_STATE_HOME で自分専用の場所を指定してください。"
+        ) from exc
+
+
+def _valid_pid(value: object) -> bool:
+    """状態ファイルから読んだ値が PID として妥当か.
+
+    ``isinstance(value, int)`` は ``bool`` も通すので型を厳密に見る。
+    0 と負数は ``os.kill`` でプロセスグループ全体を指し、1 は init なので除く。
+    """
+    return type(value) is int and value > 1
 
 
 class ExeLock:
@@ -119,13 +137,13 @@ def process_token(pid: int) -> Optional[str]:
 def _is_recorded_process(pid: int, token: Optional[str]) -> bool:
     """状態ファイルに記録したプロセスが、いまも同じプロセスとして生きているか.
 
-    ``token`` が無い (古い状態ファイル) か ``/proc`` を読めない場合は、
-    生存確認だけで妥協する。
+    ``token`` が無い状態ファイルは古いものとして扱う (現行の書き手は必ず付ける)。
+    生存確認だけで信用すると、``{"pid": <他人の pid>}`` を置かれただけで
+    そのプロセスグループへ割り込みの kill が飛ぶ。
+    ``/proc`` を読めない場合は生存確認だけで妥協する。
     """
-    if not pid_alive(pid):
+    if token is None or not pid_alive(pid):
         return False
-    if token is None:
-        return True
     current = process_token(pid)
     return current is None or current == token
 
@@ -167,11 +185,9 @@ class SpeechSlot:
         if not isinstance(data, dict):
             return None
         pid = data.get("pid")
-        if (
-            isinstance(pid, int)
-            and pid != os.getpid()
-            and not _is_recorded_process(pid, data.get("pid_token"))
-        ):
+        if not _valid_pid(pid):
+            return None
+        if pid != os.getpid() and not _is_recorded_process(pid, data.get("pid_token")):
             return None
         return data
 
@@ -222,16 +238,12 @@ class SpeechSlot:
         win_pid = state.get("win_pid")
         killed = False
 
-        if isinstance(win_pid, int):
+        if type(win_pid) is int and win_pid > 0:
             killed = taskkill(win_pid)
 
         # PID 再利用で無関係なプロセスグループを止めないよう、記録時の
-        # starttime と照合してから kill する
-        if (
-            isinstance(pid, int)
-            and pid != os.getpid()
-            and _is_recorded_process(pid, state.get("pid_token"))
-        ):
+        # starttime と照合してから kill する (read() が妥当性を検査済み)
+        if pid != os.getpid() and _is_recorded_process(pid, state.get("pid_token")):
             for sig in (signal.SIGTERM, signal.SIGKILL):
                 try:
                     os.killpg(os.getpgid(pid), sig)

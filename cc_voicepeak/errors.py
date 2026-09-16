@@ -27,3 +27,12 @@ class LockTimeout(SynthError):
 
 class PlayerError(CcVoicepeakError):
     """再生の失敗."""
+
+
+class RuntimeDirError(CcVoicepeakError):
+    """ランタイムディレクトリを自分専用の状態で用意できなかった.
+
+    状態ファイルとロックの置き場所が他ユーザから書ける状態だと、割り込みで
+    無関係なプロセスを止めたり、ロックを握られて合成が止まったりする。
+    黙って続行せず、読み上げ自体を諦める。
+    """

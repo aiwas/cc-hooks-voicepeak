@@ -9,6 +9,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
+from .fsutil import xdg_state_home
+
 _LEVELS = {
     "debug": logging.DEBUG,
     "info": logging.INFO,
@@ -99,9 +101,7 @@ class MultiProcessRotatingFileHandler(RotatingFileHandler):
 
 
 def default_log_path() -> Path:
-    base = os.environ.get("XDG_STATE_HOME")
-    root = Path(base) if base else Path.home() / ".local" / "state"
-    return root / "cc-voicepeak" / "cc-voicepeak.log"
+    return xdg_state_home() / "cc-voicepeak" / "cc-voicepeak.log"
 
 
 def setup_logging(

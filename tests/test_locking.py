@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from cc_voicepeak.errors import LockTimeout
+from cc_voicepeak.errors import LockTimeout, RuntimeDirError
 from cc_voicepeak.locking import (
     ExeLock,
     SpeechSlot,
@@ -109,23 +109,41 @@ class SpeechSlotTest(SlotTestCase):
         self.assertIsNone(slot.read())
 
     def test_interrupt_kills_running_process(self):
-        child = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True
-        )
-        slot = SpeechSlot("s4")
+        slot, child = self.occupied_slot("s4")
+        self.assertTrue(slot.interrupt())
+        self.assertTrue(self.wait_for_exit(child), "プロセスが終了していない")
+
+    def test_state_without_token_is_stale_and_never_killed(self):
+        """pid_token の無い状態ファイルは古いものとして扱い、kill しない.
+
+        生存確認だけで信用すると {"pid": <他人の pid>} を置かれただけで
+        そのプロセスグループへ SIGTERM / SIGKILL が飛ぶ。
+        """
+        slot, child = self.occupied_slot("s4b", token=None)
+        self.assertFalse(slot.busy())
+        self.assertFalse(slot.interrupt())
+        time.sleep(0.2)
+        self.assertIsNone(child.poll(), "無関係なプロセスを止めてしまった")
+
+    def test_bool_pid_is_not_a_pid(self):
+        """isinstance(True, int) は True なので型を厳密に見る."""
+        slot = SpeechSlot("s4c")
         slot.path.write_text(
-            '{"pid": %d, "win_pid": null}' % child.pid, encoding="utf-8"
+            json.dumps({"pid": True, "pid_token": "1", "win_pid": True}), encoding="utf-8"
         )
-        try:
-            self.assertTrue(slot.interrupt())
-            deadline = time.time() + 10
-            while child.poll() is None and time.time() < deadline:
-                time.sleep(0.05)
-            self.assertIsNotNone(child.poll(), "プロセスが終了していない")
-        finally:
-            if child.poll() is None:
-                child.kill()
-                child.wait()
+        self.assertFalse(slot.busy())
+        with mock.patch("cc_voicepeak.locking.taskkill") as killer:
+            self.assertFalse(slot.interrupt())
+        killer.assert_not_called()
+
+    def test_pid_below_two_is_rejected(self):
+        """0 / 負数はプロセスグループ全体、1 は init を指すので相手にしない."""
+        for pid in (0, -1, 1):
+            slot = SpeechSlot(f"s4d{pid}")
+            slot.path.write_text(
+                json.dumps({"pid": pid, "pid_token": "1"}), encoding="utf-8"
+            )
+            self.assertFalse(slot.busy(), f"pid={pid} を有効と見なした")
 
     def test_interrupt_calls_taskkill_for_windows_pid(self):
         slot = SpeechSlot("s5")
@@ -160,6 +178,36 @@ class SpeechSlotTest(SlotTestCase):
 
     def test_runtime_dir_is_private(self):
         self.assertEqual(runtime_dir().stat().st_mode & 0o777, 0o700)
+
+    def test_runtime_dir_falls_back_to_state_home_not_tmp(self):
+        """XDG_RUNTIME_DIR が無ければログと同じ $XDG_STATE_HOME 配下。/tmp は見ない."""
+        shared = self.tmp / "shared-tmp"
+        shared.mkdir()
+        os.environ.pop("XDG_RUNTIME_DIR")
+        os.environ["XDG_STATE_HOME"] = str(self.tmp / "state")
+        os.environ["TMPDIR"] = str(shared)
+        path = runtime_dir()
+        self.assertEqual(path, self.tmp / "state" / "cc-voicepeak" / "run")
+        self.assertEqual(path.stat().st_mode & 0o777, 0o700)
+        self.assertFalse((shared / "cc-voicepeak").exists())
+
+    def test_runtime_dir_rejects_symlink(self):
+        """他ユーザが先回りして置いたリンクを黙って使わない."""
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        (self.tmp / "cc-voicepeak").symlink_to(elsewhere)
+        with self.assertRaises(RuntimeDirError):
+            runtime_dir()
+        with self.assertRaises(RuntimeDirError):
+            SpeechSlot("sX")
+        with self.assertRaises(RuntimeDirError):
+            ExeLock()
+
+    def test_runtime_dir_rejects_foreign_owner(self):
+        (self.tmp / "cc-voicepeak").mkdir(mode=0o700)
+        with mock.patch("os.getuid", return_value=os.getuid() + 1):
+            with self.assertRaises(RuntimeDirError):
+                runtime_dir()
 
     def test_temp_file_name_is_per_process(self):
         slot = SpeechSlot("sB")

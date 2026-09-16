@@ -16,6 +16,12 @@ from pathlib import Path
 _OTHERS_MASK = 0o077
 
 
+def xdg_state_home() -> Path:
+    """``$XDG_STATE_HOME`` (既定 ``~/.local/state``)."""
+    base = os.environ.get("XDG_STATE_HOME")
+    return Path(base) if base else Path.home() / ".local" / "state"
+
+
 def ensure_private_dir(path: Path) -> Path:
     """``path`` を自分専用のディレクトリとして用意し、そのパスを返す.
 
