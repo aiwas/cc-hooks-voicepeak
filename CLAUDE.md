@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (369 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (373 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -425,6 +425,12 @@ context」という WARN が出るが、これは**意図どおり**。この CL
 配布名を変えるときは `plugin.json` の `name`、`marketplace.json` の `plugins[].name`、
 README のインストール手順、`commands/*.md` の相互参照（`/voicepeak:check` など）を
 揃えて直す。
+
+バージョンの正本は `cc_voicepeak/__init__.py` の `__version__`。`pyproject.toml` は
+`dynamic = ["version"]` でここを参照するので手書きしない。Claude Code が読む
+`plugin.json` と `marketplace.json` の `plugins[].version` は JSON のため参照で
+済ませられず手書きが残る。上げるときはこの 3 か所を揃える。
+`tests/test_version.py` が一致を検査するので、ずれるとテストで落ちる。
 
 ## 設定の仕組み
 

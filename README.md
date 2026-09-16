@@ -260,7 +260,7 @@ Windows も VOICEPEAK も無い環境でも全件実行できる。
 
 ```bash
 uv build          # dist/ に sdist と wheel
-uv run --no-project --with dist/cc_hooks_voicepeak-0.1.0-py3-none-any.whl \
+uv run --no-project --with dist/cc_hooks_voicepeak-*-py3-none-any.whl \
   cc-voicepeak --version
 ```
 

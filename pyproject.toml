@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cc-hooks-voicepeak"
-version = "0.1.0"
+# バージョンは cc_voicepeak/__init__.py の __version__ から取る ([tool.setuptools.dynamic])
+dynamic = ["version"]
 description = "Claude Code Hooks の結果を VOICEPEAK に読み上げさせる (WSL -> Windows 連携込み)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -43,6 +44,9 @@ cc-voicepeak = "cc_voicepeak.cli:main"
 
 [tool.setuptools]
 packages = ["cc_voicepeak"]
+
+[tool.setuptools.dynamic]
+version = { attr = "cc_voicepeak.__version__" }
 
 [tool.setuptools.package-data]
 cc_voicepeak = ["py.typed"]
