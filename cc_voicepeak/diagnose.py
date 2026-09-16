@@ -135,8 +135,10 @@ def run_checks(cfg: Config, do_synth: bool = False) -> List[CheckItem]:
         items.append(CheckItem("ブリッジ", FAIL, str(exc)))
         return items
 
-    temp_root = bridge.temp_root()
+    temp_root: Optional[Path] = None
     try:
+        # Linux 側へ落ちる場合は temp_root() 自身が所有者と権限を検査する
+        temp_root = bridge.temp_root()
         temp_root.mkdir(parents=True, exist_ok=True)
         probe = temp_root / ".write-test"
         probe.write_text("ok", encoding="utf-8")
@@ -151,12 +153,17 @@ def run_checks(cfg: Config, do_synth: bool = False) -> List[CheckItem]:
                 "CC_VOICEPEAK_TEMP で変更できます",
             )
         )
-    except OSError as exc:
+    except (OSError, CcVoicepeakError) as exc:
         items.append(
-            CheckItem("作業ディレクトリ", FAIL, f"{temp_root}: {exc}", "CC_VOICEPEAK_TEMP を設定してください")
+            CheckItem(
+                "作業ディレクトリ",
+                FAIL,
+                f"{temp_root}: {exc}" if temp_root else str(exc),
+                "CC_VOICEPEAK_TEMP を設定してください",
+            )
         )
 
-    if bridge.name == "wsl":
+    if bridge.name == "wsl" and temp_root is not None:
         try:
             win = bridge.to_win(temp_root)
             items.append(CheckItem("パス変換", OK, f"{temp_root} -> {win}"))
@@ -266,7 +273,8 @@ WSL から Windows の voicepeak.exe を叩くときの要点
 
 5. wav は Windows ファイルシステム上に出す
    \\\\wsl.localhost\\ 経由の書き込みは遅く、失敗することもある。
-   既定では Windows の %TEMP%\\cc-voicepeak を使う。
+   既定では Windows の %TEMP%\\cc-voicepeak を使う。見つからなければ
+   ~/.cache/cc-voicepeak/work (自分専用・0700) に落とす。/tmp は使わない。
 
 6. 音を鳴らすのも Windows 側にやらせる
    WSL には既定でサウンドデバイスが無い。powershell.exe の

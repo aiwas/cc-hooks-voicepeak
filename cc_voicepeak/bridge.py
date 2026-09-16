@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Dict, Iterator, Optional
 
 from .errors import BridgeError
+from .fsutil import ensure_private_dir
 from .logging_util import get_logger
 
 log = get_logger("bridge")
@@ -94,6 +95,25 @@ def env_temp_root() -> Optional[Path]:
     return Path(override) if override else None
 
 
+def local_temp_root() -> Path:
+    """Linux 側に置くときの作業ディレクトリ (``$XDG_CACHE_HOME/cc-voicepeak/work``).
+
+    ``$TMPDIR`` / ``/tmp`` は使わない。全ユーザ共有の場所だと、他ユーザが先に
+    同名のディレクトリを作って ``cache/<sha1>.wav`` を置ける
+    (:meth:`WslBridge._windows_temp_candidates` が ``C:\\Windows\\Temp`` を
+    候補から外しているのと同じ理由)。:func:`~.fsutil.ensure_private_dir` で
+    自分専用であることを検査し、満たさなければ :class:`BridgeError` にする。
+    """
+    path = _cache_dir() / "work"
+    try:
+        return ensure_private_dir(path)
+    except OSError as exc:
+        raise BridgeError(
+            f"作業ディレクトリを安全に用意できません: {exc}\n"
+            "CC_VOICEPEAK_TEMP で自分専用のディレクトリを指定してください。"
+        ) from exc
+
+
 class Bridge:
     """パス変換と実行環境を抽象化する基底クラス."""
 
@@ -141,11 +161,7 @@ class LocalBridge(Bridge):
 
     def temp_root(self) -> Path:
         if self._temp_root is None:
-            self._temp_root = (
-                self._explicit_temp
-                or env_temp_root()
-                or Path(os.environ.get("TMPDIR", "/tmp")) / "cc-voicepeak"
-            )
+            self._temp_root = self._explicit_temp or env_temp_root() or local_temp_root()
         return self._temp_root
 
     def exec_cwd(self) -> str:
@@ -232,8 +248,9 @@ class WslBridge(Bridge):
                 self._temp_root = candidate / "cc-voicepeak"
                 return self._temp_root
 
-        # 最後の手段: WSL 側 (\\wsl.localhost 経由になるので遅い)
-        self._temp_root = Path(os.environ.get("TMPDIR", "/tmp")) / "cc-voicepeak"
+        # 最後の手段: WSL 側 (\\wsl.localhost 経由になるので遅い)。
+        # ここでも /tmp ではなくユーザ専用の場所を使う
+        self._temp_root = local_temp_root()
         log.warning(
             "Windows 側の TEMP が見つかりません。%s を使いますが、"
             "9p 経由になるため遅く、環境によっては失敗します。"

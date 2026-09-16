@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import os
 import shutil
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -156,10 +157,46 @@ class TempRootTest(unittest.TestCase):
         query.assert_called_once_with("TEMP")
         self.assertEqual(_read_cached_wintemp(), win_temp)
 
-    def test_falls_back_to_tmpdir(self):
+    def test_falls_back_to_user_cache_dir_not_tmpdir(self):
+        """最後の手段は $XDG_CACHE_HOME/cc-voicepeak/work で、$TMPDIR は見ない.
+
+        /tmp は全ユーザ共有なので、C:\\Windows\\Temp を外したのと同じ理由で使わない。
+        """
+        shared = self.tmp / "shared-tmp"
+        shared.mkdir()
+        with mock.patch.object(WslBridge, "_query_windows_env", return_value=None), \
+                mock.patch.dict(os.environ, {"TMPDIR": str(shared)}):
+            root = WslBridge().temp_root()
+
+        self.assertEqual(root, self.tmp / "cache" / "cc-voicepeak" / "work")
+        self.assertFalse((shared / "cc-voicepeak").exists())
+        # 用意した時点で自分専用 (0700) になっている
+        self.assertTrue(root.is_dir())
+        self.assertEqual(stat.S_IMODE(root.lstat().st_mode), 0o700)
+
+    def test_fallback_rejects_unsafe_directory(self):
+        """フォールバック先が自分専用でなければ黙って使わず BridgeError にする."""
+        cache = self.tmp / "cache" / "cc-voicepeak"
+        cache.mkdir(parents=True)
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        (cache / "work").symlink_to(elsewhere)
+
         with mock.patch.object(WslBridge, "_query_windows_env", return_value=None):
-            with mock.patch.dict(os.environ, {"TMPDIR": str(self.tmp)}):
-                self.assertEqual(WslBridge().temp_root(), self.tmp / "cc-voicepeak")
+            with self.assertRaises(BridgeError) as ctx:
+                WslBridge().temp_root()
+        self.assertIn("CC_VOICEPEAK_TEMP", str(ctx.exception))
+
+    def test_explicit_temp_is_not_inspected(self):
+        """CC_VOICEPEAK_TEMP は利用者の指定なので所有者検査の対象外.
+
+        /mnt/c 配下 (drvfs) は権限が 0777 に見えるため、検査すると必ず落ちる。
+        """
+        explicit = self.tmp / "explicit"
+        explicit.mkdir()
+        explicit.chmod(0o777)
+        with mock.patch.dict(os.environ, {"CC_VOICEPEAK_TEMP": str(explicit)}):
+            self.assertEqual(WslBridge().temp_root(), explicit)
 
     def test_shared_windows_temp_is_not_a_candidate(self):
         """全ユーザ共有の C:\\Windows\\Temp へは落とさない.
@@ -170,16 +207,13 @@ class TempRootTest(unittest.TestCase):
         """
         # /mnt/c 相当の直下に Windows/Temp を実在させる
         (self.tmp / "Windows" / "Temp").mkdir(parents=True)
-        fallback = self.tmp / "wsl-side"
-        fallback.mkdir()
 
         with mock.patch.object(bridge_module, "WIN_DRIVE_ROOTS", (str(self.tmp),)), \
-                mock.patch.object(WslBridge, "_query_windows_env", return_value=None), \
-                mock.patch.dict(os.environ, {"TMPDIR": str(fallback)}):
+                mock.patch.object(WslBridge, "_query_windows_env", return_value=None):
             root = WslBridge().temp_root()
 
-        # 実在していても選ばれず、WSL 側へ落ちる
-        self.assertEqual(root, fallback / "cc-voicepeak")
+        # 実在していても選ばれず、WSL 側のユーザ専用ディレクトリへ落ちる
+        self.assertEqual(root, self.tmp / "cache" / "cc-voicepeak" / "work")
 
     def test_query_windows_env_uses_last_line(self):
         completed = SimpleNamespace(stdout="C:\\Users\\u\\AppData\\Local\\Temp\n", returncode=0)
@@ -209,6 +243,17 @@ class LocalBridgeTest(unittest.TestCase):
         bridge = LocalBridge()
         with mock.patch.dict(os.environ, {"CC_VOICEPEAK_TEMP": "/tmp/later"}):
             self.assertEqual(bridge.temp_root(), Path("/tmp/later"))
+
+    def test_default_is_user_cache_dir(self):
+        """既定も WslBridge の最後の手段と同じユーザ専用ディレクトリ."""
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        env = {"XDG_CACHE_HOME": str(tmp), "TMPDIR": str(tmp / "shared")}
+        with mock.patch.dict(os.environ, env):
+            os.environ.pop("CC_VOICEPEAK_TEMP", None)
+            root = LocalBridge().temp_root()
+        self.assertEqual(root, tmp / "cc-voicepeak" / "work")
+        self.assertEqual(stat.S_IMODE(root.lstat().st_mode), 0o700)
 
 
 class DetectBridgeTest(unittest.TestCase):

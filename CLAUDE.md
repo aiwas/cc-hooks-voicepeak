@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (350 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (360 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -80,6 +80,7 @@ VOICEPEAK のコマンドラインには 2 つの厳しい制約がある。
 | `cc_voicepeak/player.py` | 常駐 PowerShell プレイヤ / WSL 側コマンド |
 | `cc_voicepeak/pipeline.py` | 整形→分割→合成→再生の接続 |
 | `cc_voicepeak/bridge.py` | WSL↔Windows のパス変換・EXE 探索・一時領域 |
+| `cc_voicepeak/fsutil.py` | ユーザ専用ディレクトリの用意と検査（`ensure_private_dir`） |
 | `cc_voicepeak/locking.py` | EXE 直列化と割り込み制御 |
 | `cc_voicepeak/config.py` | 設定のマージと検証。既定値は `DEFAULTS` |
 | `cc_voicepeak/diagnose.py` | `check` サブコマンドの中身 |
@@ -150,10 +151,18 @@ WSL 側のパスを cwd にして Windows EXE を起動すると
 他ユーザが書ける場所だと先回りして wav を置かれ、中身を検証せずに再生してしまう。
 速度よりこちらを優先する。
 
-どちらも見つからないときは最後の手段として `$TMPDIR`（既定 `/tmp`）配下に落ちる
-（9p 経由になるので遅いうえ環境によっては失敗する）。ここに落ちるのは
+どちらも見つからないときは最後の手段として `$XDG_CACHE_HOME/cc-voicepeak/work`
+（既定 `~/.cache/cc-voicepeak/work`）に落ちる（`bridge.local_temp_root()`。
+9p 経由になるので遅いうえ環境によっては失敗する）。ここに落ちるのは
 `cmd.exe` が使えず、かつユーザプロファイルの Temp も無いという異常な状態なので、
-WARN を出して `CC_VOICEPEAK_TEMP` での明示を促す。
+WARN を出して `CC_VOICEPEAK_TEMP` での明示を促す。`LocalBridge` の既定も同じ場所。
+
+`$TMPDIR` / `/tmp` は使わない。全ユーザ共有なので、`C:\Windows\Temp` を外したのと
+同じ理由で他ユーザが先回りできる。さらに `fsutil.ensure_private_dir()` が
+「シンボリックリンクでない・所有者が自分・`0700`」を要求し、満たさなければ
+`BridgeError` にして `CC_VOICEPEAK_TEMP` での指定を促す（黙って使わない）。
+`CC_VOICEPEAK_TEMP` で明示したパスと Windows 側の候補は検査しない。drvfs 上の
+`/mnt/c/...` は権限が `0777` に見えるため、検査すると必ず落ちる。
 
 ### 6. 音を鳴らすのも Windows 側にやらせる
 
