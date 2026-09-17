@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .bridge import Bridge, detect_bridge, interop_enabled, is_wsl, resolve_exe
-from .config import Config, unknown_keys
+from .config import Config, legacy_config_path, unknown_keys
 from .errors import CcVoicepeakError
 from .player import find_powershell
 
@@ -207,6 +207,18 @@ def run_checks(cfg: Config, do_synth: bool = False) -> list[CheckItem]:
         )
     else:
         items.append(CheckItem("設定ファイル", WARN, "未検出 (既定値で動作します)"))
+
+    legacy = legacy_config_path()
+    if legacy is not None:
+        items.append(
+            CheckItem(
+                "プロジェクト設定",
+                WARN,
+                f"{legacy} は読み込まれません",
+                "~/.config/cc-voicepeak/config.json へ移すか、"
+                "CC_VOICEPEAK_CONFIG / --config で明示してください",
+            )
+        )
 
     unknown = unknown_keys(cfg)
     if unknown:

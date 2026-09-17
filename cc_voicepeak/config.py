@@ -195,25 +195,53 @@ def _coerce_known_keys(data: dict[str, Any]) -> None:
             node[path[-1]] = _coerce(path, node[path[-1]])
 
 
+# 以前はここも暗黙に読んでいた。移行の案内のために場所だけ残す (下記 legacy_config_path)。
+LEGACY_PROJECT_CONFIG = Path(".claude") / "voicepeak.json"
+
+
 def config_search_paths() -> list[Path]:
-    """探索対象の設定ファイルを優先度の低い順に返す."""
+    """探索対象の設定ファイルを優先度の低い順に返す.
+
+    **プロジェクト側のファイルは探索しない。** 読み上げの設定は
+    ``voicepeak.exe`` のパスや持っている声など、そのホスト固有の値が中心で、
+    clone したリポジトリが知り得る内容ではない。一方で
+    ``$CLAUDE_PROJECT_DIR/.claude/voicepeak.json`` を暗黙に読むと、
+    リポジトリを開いただけで ``voicepeak.exe`` (任意の実行ファイル) や
+    ``log.file`` (任意パスへの追記と rename) が持ち込まれる。Claude Code の
+    フォルダ信頼ダイアログは ``settings.json`` が対象でこのファイルを含まないため、
+    「自分で書いた設定」と「clone に付いてきた設定」を実行時に区別できない。
+    プロジェクト単位で変えたい場合は ``CC_VOICEPEAK_CONFIG`` か ``--config`` で
+    明示する。
+    """
     paths: list[Path] = []
 
     xdg = os.environ.get("XDG_CONFIG_HOME")
     config_home = Path(xdg) if xdg else Path.home() / ".config"
     paths.append(config_home / "cc-voicepeak" / "config.json")
 
-    # CLAUDE_PROJECT_DIR があるときは cwd を足さない。
-    # 足すと cwd 側が後勝ちになり、プロジェクト設定を意図せず上書きしてしまう。
-    project = os.environ.get("CLAUDE_PROJECT_DIR")
-    root = Path(project) if project else Path.cwd()
-    paths.append(root / ".claude" / "voicepeak.json")
-
     explicit = os.environ.get("CC_VOICEPEAK_CONFIG")
     if explicit:
         paths.append(Path(explicit).expanduser())
 
     return paths
+
+
+def legacy_config_path() -> Path | None:
+    """読まなくなったプロジェクト設定が置かれていればそのパスを返す.
+
+    黙って無視すると「設定が効かなくなった」としか見えないので、
+    ``check`` が移行を案内するために使う。
+    """
+    project = os.environ.get("CLAUDE_PROJECT_DIR")
+    roots = [Path(project)] if project else [Path.cwd()]
+    for root in roots:
+        path = root / LEGACY_PROJECT_CONFIG
+        try:
+            if path.is_file():
+                return path
+        except OSError:
+            continue
+    return None
 
 
 def unknown_keys(cfg: Config) -> list[str]:

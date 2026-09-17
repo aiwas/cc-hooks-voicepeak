@@ -60,7 +60,8 @@ export CC_VOICEPEAK_EXE='/mnt/c/Program Files/VOICEPEAK/voicepeak.exe'
 ./bin/cc-voicepeak speak "接続テストです。" -n 'Miyamai Moca' -e 'honwaka=40'
 ```
 
-気に入った設定は `.claude/voicepeak.json` に書いておく（`examples/voicepeak.json` 参照）。
+気に入った設定は `~/.config/cc-voicepeak/config.json` に書いておく
+（`examples/voicepeak.json` 参照）。
 
 ### 4. Hook を登録する
 
@@ -85,7 +86,7 @@ claude --plugin-dir /path/to/cc-hooks-voicepeak
 ```
 
 声や `voicepeak.exe` のパスは、プラグインで入れた場合も設定ファイル
-（`.claude/voicepeak.json` など、後述の「設定」を参照）で指定する。
+（`~/.config/cc-voicepeak/config.json` など、後述の「設定」を参照）で指定する。
 
 `SubagentStop` は hook としては登録されるが、既定では読み上げない。
 サブエージェントの完了も読ませたい場合は設定の `hook.subagent` を `true` にする。
@@ -201,14 +202,22 @@ $ ./bin/cc-voicepeak split -f notes.md
 
 1. 組み込みデフォルト
 2. `~/.config/cc-voicepeak/config.json`（`$XDG_CONFIG_HOME` 対応）
-3. `.claude/voicepeak.json`（`$CLAUDE_PROJECT_DIR` が設定されていればそこ、
-   無ければカレントディレクトリ）
-4. `$CC_VOICEPEAK_CONFIG` が指すファイル
-5. 環境変数（`CC_VOICEPEAK_EXE` `CC_VOICEPEAK_NARRATOR` `CC_VOICEPEAK_PLAYER` など）
-6. `--config PATH` で指定したファイル
-7. コマンドライン引数
+3. `$CC_VOICEPEAK_CONFIG` が指すファイル
+4. 環境変数（`CC_VOICEPEAK_EXE` `CC_VOICEPEAK_NARRATOR` `CC_VOICEPEAK_PLAYER` など）
+5. `--config PATH` で指定したファイル
+6. コマンドライン引数
 
-`examples/voicepeak.json` が主要なキーを埋めた設定例で、2 か 3 の場所へそのまま置ける。
+**プロジェクト側のファイルは読み込まない。** 読み上げの設定は voicepeak.exe の
+パスや手元にある声など、そのホスト固有の値が中心で、clone したリポジトリが
+知り得る内容ではない。一方で `$CLAUDE_PROJECT_DIR/.claude/voicepeak.json` を
+暗黙に読むと、リポジトリを開いただけで `voicepeak.exe`（任意の実行ファイル）や
+`log.file`（任意パスへの追記）が持ち込まれる。Claude Code のフォルダ信頼
+ダイアログは `settings.json` が対象でこのファイルを含まないため、自分で書いた
+設定と clone に付いてきた設定を区別できない。プロジェクトごとに変えたい場合は
+`CC_VOICEPEAK_CONFIG` か `--config` で明示する。以前この場所に設定を置いていた
+場合は `cc-voicepeak check` が WARN で知らせる。
+
+`examples/voicepeak.json` が主要なキーを埋めた設定例で、2 の場所へそのまま置ける。
 JSON にはコメントを書けず、`$comment` のような独自キーは `check` が
 「既定値に無いキーです」と WARN を出すため、サンプルには説明を入れていない。
 

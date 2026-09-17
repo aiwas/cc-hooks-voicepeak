@@ -75,7 +75,14 @@ class CliTestCase(unittest.TestCase):
         )
         return path
 
+    def write_user_config(self, data: dict) -> Path:
+        path = Path(self.env["XDG_CONFIG_HOME"]) / "cc-voicepeak" / "config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        return path
+
     def write_project_config(self, data: dict) -> Path:
+        """読み込まれなくなったプロジェクト設定を置く (否定テスト用)."""
         path = Path(self.env["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
@@ -243,7 +250,7 @@ class SpeakCommandTest(CliTestCase):
         played = self.install_fake_powershell()
         # 環境変数は設定ファイルより後に重なるので、外さないと設定が埋もれる
         self.env.pop("CC_VOICEPEAK_PLAYER", None)
-        self.write_project_config({"player": {"backend": "powershell"}})
+        self.write_user_config({"player": {"backend": "powershell"}})
 
         # まず設定ファイルどおりに再生されることを確かめる (空振りの検出)
         self.run_cli("speak", "--stdin", stdin="設定ファイルの指定で再生されます。", check=True)
@@ -374,13 +381,13 @@ class HookCommandTest(CliTestCase):
 
 class HookConfigTest(CliTestCase):
     def test_min_chars_skips_short_text(self):
-        self.write_project_config({"hook": {"min_chars": 20}})
+        self.write_user_config({"hook": {"min_chars": 20}})
         payload = {"hook_event_name": "Notification", "message": "短い"}
         self.run_cli("hook", "--sync", stdin=json.dumps(payload), check=True)
         self.assertEqual(self.recorded_calls(), [])
 
     def test_prefix_and_suffix_are_added(self):
-        self.write_project_config({"hook": {"prefix": "まもなく、", "suffix": "以上です。"}})
+        self.write_user_config({"hook": {"prefix": "まもなく、", "suffix": "以上です。"}})
         path = self.transcript("処理が完了しました。")
         payload = {"hook_event_name": "Stop", "transcript_path": str(path)}
         self.run_cli("hook", "--sync", stdin=json.dumps(payload), check=True)
@@ -389,7 +396,7 @@ class HookConfigTest(CliTestCase):
         self.assertTrue(spoken.endswith("以上です。"), spoken)
 
     def test_notification_prefix_is_added(self):
-        self.write_project_config({"hook": {"notification_prefix": "お知らせ。"}})
+        self.write_user_config({"hook": {"notification_prefix": "お知らせ。"}})
         payload = {"hook_event_name": "Notification", "message": "許可が必要です"}
         self.run_cli("hook", "--sync", stdin=json.dumps(payload), check=True)
         self.assertTrue(self.recorded_calls()[0]["text"].startswith("お知らせ。"))
@@ -401,7 +408,7 @@ class HookConfigTest(CliTestCase):
         self.assertEqual(self.recorded_calls(), [])
 
     def test_subagent_stop_is_read_when_enabled(self):
-        self.write_project_config({"hook": {"subagent": True}})
+        self.write_user_config({"hook": {"subagent": True}})
         path = self.transcript("サブエージェントの結果です。")
         payload = {"hook_event_name": "SubagentStop", "transcript_path": str(path)}
         self.run_cli("hook", "--sync", stdin=json.dumps(payload), check=True)
@@ -415,12 +422,12 @@ class HookConfigTest(CliTestCase):
 
     def test_removed_detach_key_is_reported_as_unknown(self):
         # hook.detach は廃止済み。設定に書かれていても読み上げはデタッチされる
-        self.write_project_config({"hook": {"detach": False}})
+        self.write_user_config({"hook": {"detach": False}})
         proc = self.run_cli("check")
         self.assertIn("hook.detach", proc.stdout.decode("utf-8"))
 
     def test_removed_detach_key_does_not_force_sync(self):
-        self.write_project_config({"hook": {"detach": False}})
+        self.write_user_config({"hook": {"detach": False}})
         path = self.transcript("設定では同期にならないことの確認です。")
         payload = {
             "hook_event_name": "Stop",
@@ -431,6 +438,63 @@ class HookConfigTest(CliTestCase):
         # デタッチされるので hook 自身は合成を待たずに終わる
         self.assertEqual(proc.stdout.decode().strip(), "")
         self.assertTrue(self.wait_for_calls(), "別プロセスでの合成が行われていない")
+
+
+class ProjectConfigTest(CliTestCase):
+    """clone したリポジトリ同梱の設定を読み込まないこと.
+
+    Claude Code のフォルダ信頼ダイアログは settings.json が対象で
+    .claude/voicepeak.json を含まないため、「自分で書いた設定」と
+    「clone に付いてきた設定」を実行時に区別できない。
+    """
+
+    def test_project_config_does_not_reach_the_exe(self):
+        # voicepeak.exe に任意の実行ファイルを持ち込めないこと
+        marker = self.tmp / "evil-ran"
+        evil = self.tmp / "evil.sh"
+        evil.write_text(
+            "#!/usr/bin/env bash" + NL + f'touch "{marker}"' + NL, encoding="utf-8"
+        )
+        evil.chmod(0o755)
+        self.write_project_config({"voicepeak": {"exe": str(evil)}})
+        del self.env["CC_VOICEPEAK_EXE"]  # 環境変数が先に勝つと検証にならない
+
+        path = self.transcript("設定が持ち込まれないことの確認です。")
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": "evil-exe",
+            "transcript_path": str(path),
+        }
+        self.run_cli("hook", "--sync", stdin=json.dumps(payload), check=True)
+        self.assertFalse(marker.exists(), "プロジェクト設定の exe が実行された")
+
+    def test_project_config_does_not_redirect_the_log(self):
+        target = self.tmp / "hijacked.log"
+        self.write_project_config(
+            {"log": {"file": str(target), "level": "info"}}
+        )
+        del self.env["CC_VOICEPEAK_LOG_LEVEL"]
+        self.run_cli("speak", "ログの出力先を確認します。", check=True)
+        self.assertFalse(target.exists(), "プロジェクト設定でログの出力先を変えられた")
+
+    def test_project_config_values_are_ignored(self):
+        self.write_project_config({"voicepeak": {"narrator": "プロジェクト"}})
+        proc = self.run_cli("check", "--print-config", check=True)
+        payload = json.loads(proc.stdout.decode("utf-8"))
+        self.assertIsNone(payload["voicepeak"]["narrator"])
+
+    def test_check_points_at_the_ignored_file(self):
+        self.write_project_config({"voicepeak": {"narrator": "プロジェクト"}})
+        output = self.run_cli("check").stdout.decode("utf-8")
+        self.assertIn("プロジェクト設定", output)
+        self.assertIn("voicepeak.json", output)
+
+    def test_explicit_config_is_still_honoured(self):
+        # 明示した場合だけ読む (--config / CC_VOICEPEAK_CONFIG)
+        path = self.write_project_config({"voicepeak": {"narrator": "明示"}})
+        proc = self.run_cli("--config", str(path), "check", "--print-config", check=True)
+        payload = json.loads(proc.stdout.decode("utf-8"))
+        self.assertEqual(payload["voicepeak"]["narrator"], "明示")
 
 
 class SafePathTest(CliTestCase):
@@ -506,20 +570,20 @@ class SafePathTest(CliTestCase):
 class ExitCodeTest(CliTestCase):
     def test_hook_survives_non_cc_voicepeak_exception(self):
         # hook.min_chars が設定ファイル由来だと int() が ValueError を送出する
-        self.write_project_config({"hook": {"min_chars": "x"}})
+        self.write_user_config({"hook": {"min_chars": "x"}})
         payload = {"hook_event_name": "Notification", "message": "テスト"}
         proc = self.run_cli("hook", "--sync", stdin=json.dumps(payload))
         self.assertEqual(proc.returncode, 0, proc.stderr.decode())
 
     def test_hook_survives_config_error(self):
-        self.write_project_config({"voicepeak": {"char_limit": 500}})
+        self.write_user_config({"voicepeak": {"char_limit": 500}})
         payload = {"hook_event_name": "Notification", "message": "テスト"}
         proc = self.run_cli("hook", "--sync", stdin=json.dumps(payload))
         self.assertEqual(proc.returncode, 0, proc.stderr.decode())
 
     def test_other_commands_report_failure_inside_project(self):
         # CLAUDE_PROJECT_DIR があっても hook 以外は終了コードを握り潰さない
-        self.write_project_config({"voicepeak": {"char_limit": 500}})
+        self.write_user_config({"voicepeak": {"char_limit": 500}})
         proc = self.run_cli("speak", "テスト")
         self.assertEqual(proc.returncode, 1)
         self.assertIn("char_limit", proc.stderr.decode("utf-8"))
@@ -620,11 +684,7 @@ class MiscCommandTest(CliTestCase):
         self.assertIn("ブロック", proc.stderr.decode("utf-8"))
 
     def test_check_warns_about_unknown_keys(self):
-        path = Path(self.env["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({"voicepeak": {"narator": "誤字"}}), encoding="utf-8"
-        )
+        self.write_user_config({"voicepeak": {"narator": "誤字"}})
         proc = self.run_cli("check")
         output = proc.stdout.decode("utf-8")
         self.assertIn("設定キー", output)

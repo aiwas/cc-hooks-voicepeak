@@ -9,7 +9,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cc_voicepeak.config import VOICEPEAK_CHAR_LIMIT, load_config, unknown_keys
+from cc_voicepeak.config import (
+    VOICEPEAK_CHAR_LIMIT,
+    config_search_paths,
+    legacy_config_path,
+    load_config,
+    unknown_keys,
+)
 from cc_voicepeak.errors import ConfigError
 
 
@@ -48,7 +54,8 @@ class ConfigTest(unittest.TestCase):
         # 指定していないキーは既定値のまま
         self.assertEqual(cfg.get("voicepeak.char_limit"), VOICEPEAK_CHAR_LIMIT)
 
-    def test_project_config_wins_over_user_config(self):
+    def test_project_config_is_not_searched(self):
+        """clone に付いてきた設定を暗黙に読まない (信頼スコープの分離)."""
         self.write(
             Path(os.environ["XDG_CONFIG_HOME"]) / "cc-voicepeak" / "config.json",
             {"voicepeak": {"narrator": "ユーザー"}},
@@ -57,11 +64,23 @@ class ConfigTest(unittest.TestCase):
             Path(os.environ["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json",
             {"voicepeak": {"narrator": "プロジェクト"}},
         )
-        self.assertEqual(load_config().get("voicepeak.narrator"), "プロジェクト")
+        self.assertEqual(load_config().get("voicepeak.narrator"), "ユーザー")
+
+    def test_project_config_is_not_in_the_search_paths(self):
+        for path in config_search_paths():
+            self.assertNotIn(".claude", path.parts)
+
+    def test_legacy_project_config_is_reported(self):
+        self.assertIsNone(legacy_config_path())
+        path = self.write(
+            Path(os.environ["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json",
+            {"voicepeak": {"narrator": "プロジェクト"}},
+        )
+        self.assertEqual(legacy_config_path(), path)
 
     def test_env_overrides_files(self):
         self.write(
-            Path(os.environ["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json",
+            Path(os.environ["XDG_CONFIG_HOME"]) / "cc-voicepeak" / "config.json",
             {"voicepeak": {"narrator": "ファイル"}},
         )
         os.environ["CC_VOICEPEAK_NARRATOR"] = "環境変数"
@@ -90,19 +109,16 @@ class ConfigTest(unittest.TestCase):
         self.addCleanup(os.chdir, previous)
         return path
 
-    def test_cwd_is_not_searched_when_project_dir_is_set(self):
-        # cwd 側を後から重ねると、プロジェクト設定を意図せず上書きしてしまう
-        self.in_cwd({"voicepeak": {"narrator": "cwd"}})
-        self.write(
-            Path(os.environ["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json",
-            {"voicepeak": {"narrator": "プロジェクト"}},
-        )
-        self.assertEqual(load_config().get("voicepeak.narrator"), "プロジェクト")
-
-    def test_cwd_is_searched_without_project_dir(self):
+    def test_cwd_is_not_searched(self):
+        """任意のディレクトリで実行しただけで設定を拾わない."""
         del os.environ["CLAUDE_PROJECT_DIR"]
         self.in_cwd({"voicepeak": {"narrator": "cwd"}})
-        self.assertEqual(load_config().get("voicepeak.narrator"), "cwd")
+        self.assertIsNone(load_config().get("voicepeak.narrator"))
+
+    def test_legacy_cwd_config_is_reported_without_project_dir(self):
+        del os.environ["CLAUDE_PROJECT_DIR"]
+        path = self.in_cwd({"voicepeak": {"narrator": "cwd"}})
+        self.assertEqual(legacy_config_path(), path)
 
     def test_cli_overrides_win(self):
         os.environ["CC_VOICEPEAK_NARRATOR"] = "環境変数"
@@ -113,27 +129,28 @@ class ConfigTest(unittest.TestCase):
         os.environ["CC_VOICEPEAK_CHAR_LIMIT"] = "100"
         self.assertEqual(load_config().get("voicepeak.char_limit"), 100)
 
-    def project_config(self, data: dict) -> Path:
-        return self.write(
-            Path(os.environ["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json", data
-        )
+    def user_config_path(self) -> Path:
+        return Path(os.environ["XDG_CONFIG_HOME"]) / "cc-voicepeak" / "config.json"
+
+    def user_config(self, data: dict) -> Path:
+        return self.write(self.user_config_path(), data)
 
     def test_file_numeric_string_is_coerced(self):
-        self.project_config({"voicepeak": {"speed": "120"}})
+        self.user_config({"voicepeak": {"speed": "120"}})
         self.assertEqual(load_config().get("voicepeak.speed"), 120)
 
     def test_file_non_numeric_string_raises_config_error(self):
-        self.project_config({"voicepeak": {"speed": "fast"}})
+        self.user_config({"voicepeak": {"speed": "fast"}})
         with self.assertRaises(ConfigError):
             load_config()
 
     def test_file_min_chars_string_raises_config_error(self):
-        self.project_config({"hook": {"min_chars": "x"}})
+        self.user_config({"hook": {"min_chars": "x"}})
         with self.assertRaises(ConfigError):
             load_config()
 
     def test_broken_json_raises(self):
-        path = Path(os.environ["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json"
+        path = self.user_config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{not json", encoding="utf-8")
         with self.assertRaises(ConfigError):
@@ -164,7 +181,7 @@ class ConfigTest(unittest.TestCase):
         ]
         for data in cases:
             with self.subTest(data=data):
-                self.project_config(data)
+                self.user_config(data)
                 with self.assertRaises(ConfigError):
                     load_config()
 
@@ -180,29 +197,29 @@ class ConfigTest(unittest.TestCase):
         ]
         for data in cases:
             with self.subTest(data=data):
-                self.project_config(data)
+                self.user_config(data)
                 with self.assertRaises(ConfigError):
                     load_config()
 
     def test_hook_events_must_be_a_list_of_strings(self):
-        self.project_config({"hook": {"events": "Stop"}})
+        self.user_config({"hook": {"events": "Stop"}})
         with self.assertRaises(ConfigError):
             load_config()
 
     def test_boolean_is_not_accepted_as_integer(self):
-        self.project_config({"hook": {"min_chars": True}})
+        self.user_config({"hook": {"min_chars": True}})
         with self.assertRaises(ConfigError):
             load_config()
 
     def test_top_level_must_be_an_object(self):
-        path = Path(os.environ["CLAUDE_PROJECT_DIR"]) / ".claude" / "voicepeak.json"
+        path = self.user_config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("[1, 2]", encoding="utf-8")
         with self.assertRaises(ConfigError):
             load_config()
 
     def test_unknown_keys_are_listed(self):
-        self.project_config({"voicepeak": {"narator": "誤字"}, "unknown_section": {}})
+        self.user_config({"voicepeak": {"narator": "誤字"}, "unknown_section": {}})
         self.assertEqual(
             unknown_keys(load_config()), ["unknown_section", "voicepeak.narator"]
         )

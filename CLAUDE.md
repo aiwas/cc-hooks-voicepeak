@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (385 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (392 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -462,7 +462,19 @@ README のインストール手順、`commands/*.md` の相互参照（`/voicepe
 読み込み順は README の通りで、`_merge_files()` がファイルを `_deep_merge()` で再帰
 マージし、`_ENV_MAP` の環境変数、`--config` のファイル、最後に CLI 引数を重ねる。
 `--config` を環境変数より後に置いているのは、これがコマンドライン引数だから。
-プロジェクト設定の探索は `CLAUDE_PROJECT_DIR` があればそこだけ、無ければ cwd。
+**プロジェクト側（`.claude/voicepeak.json`）と cwd は探索しない。** 設定の中身は
+`voicepeak.exe` のパスや手元にある声といったホスト固有の値が中心で、clone した
+リポジトリが知り得る内容ではない。逆に暗黙に読むと、リポジトリを開いただけで
+`voicepeak.exe`（任意の実行ファイルが `-s <本文>` 付きで起動される）や
+`log.file`（任意パスへの追記、`RotatingFileHandler` の rename による置き換え）が
+持ち込まれる。Claude Code のフォルダ信頼ダイアログは `settings.json` が対象で
+このファイルを含まないため、「自分で書いた設定」と「clone に付いてきた設定」を
+実行時に区別できない。キーごとに信頼スコープを分ける案もあったが、キーが増える
+たびに「これは OS に届くか」を判断し続ける設計になるので、読む場所を減らす方を
+採った。プロジェクト単位で変えたい場合は `CC_VOICEPEAK_CONFIG` か `--config`。
+以前の場所にファイルが残っている場合は `config.legacy_config_path()` が拾い、
+`check` が移行を促す WARN を出す（黙って無視すると「設定が効かない」としか
+見えないため）。
 
 `_INT_KEYS` に入っているキーは、環境変数・CLI 引数・**設定ファイル**のいずれから
 来ても `_coerce_known_keys()` で int に変換される（変換できなければ `ConfigError`）。

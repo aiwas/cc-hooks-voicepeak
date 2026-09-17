@@ -111,6 +111,7 @@ class SlotTestCase(unittest.TestCase):
             start_new_session=True,
         )
         self.addCleanup(self.stop_child, parent)
+        self.addCleanup(parent.stdout.close)
         child_pid = int(parent.stdout.readline().decode().strip())
         self.addCleanup(self.kill_pid, child_pid)
         return parent, child_pid
