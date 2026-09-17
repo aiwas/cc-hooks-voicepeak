@@ -182,7 +182,9 @@ cc-voicepeak install-hook                    settings.json スニペット
 `-o/--out` `--stdin` `-f/--file` `--session` `--on-busy`。
 
 `hook` には `--event`（イベント名の上書き）と `--sync`（別プロセスに投げず読み上げ完了
-まで待つ。デバッグ用）がある。
+まで待つ。デバッグ用）がある。`--sync` は読み上げが終わるまで hook が返らないので、
+Claude Code に登録した状態で使うと `timeout` に達する。手で実行して失敗の内容を
+確認したいときだけ付ける。
 
 長い文章がどこで区切られるかは、合成せずに確認できる。
 

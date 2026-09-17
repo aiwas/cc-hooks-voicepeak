@@ -407,13 +407,30 @@ class HookConfigTest(CliTestCase):
         self.run_cli("hook", "--sync", stdin=json.dumps(payload), check=True)
         self.assertTrue(self.recorded_calls())
 
-    def test_detach_false_speaks_before_returning(self):
-        self.write_project_config({"hook": {"detach": False}})
+    def test_sync_speaks_before_returning(self):
         path = self.transcript("同期で読み上げます。")
         payload = {"hook_event_name": "Stop", "transcript_path": str(path)}
-        # --sync を付けなくても hook.detach が false なら待つ
-        self.run_cli("hook", stdin=json.dumps(payload), check=True)
+        self.run_cli("hook", "--sync", stdin=json.dumps(payload), check=True)
         self.assertTrue(self.recorded_calls())
+
+    def test_removed_detach_key_is_reported_as_unknown(self):
+        # hook.detach は廃止済み。設定に書かれていても読み上げはデタッチされる
+        self.write_project_config({"hook": {"detach": False}})
+        proc = self.run_cli("check")
+        self.assertIn("hook.detach", proc.stdout.decode("utf-8"))
+
+    def test_removed_detach_key_does_not_force_sync(self):
+        self.write_project_config({"hook": {"detach": False}})
+        path = self.transcript("設定では同期にならないことの確認です。")
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": "detach-key-gone",
+            "transcript_path": str(path),
+        }
+        proc = self.run_cli("hook", stdin=json.dumps(payload), check=True)
+        # デタッチされるので hook 自身は合成を待たずに終わる
+        self.assertEqual(proc.stdout.decode().strip(), "")
+        self.assertTrue(self.wait_for_calls(), "別プロセスでの合成が行われていない")
 
 
 class SafePathTest(CliTestCase):

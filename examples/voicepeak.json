@@ -39,8 +39,7 @@
     "min_chars": 2,
     "prefix": "",
     "suffix": "",
-    "subagent": false,
-    "detach": true
+    "subagent": false
   },
 
   "log": {

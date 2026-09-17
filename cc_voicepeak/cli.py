@@ -88,7 +88,9 @@ def build_parser() -> argparse.ArgumentParser:
     hook_cmd = sub.add_parser("hook", help="Claude Code Hooks から呼ぶ")
     hook_cmd.add_argument("--event", help="hook_event_name を上書きする")
     hook_cmd.add_argument(
-        "--sync", action="store_true", help="別プロセスに投げず、読み上げ完了まで待つ"
+        "--sync",
+        action="store_true",
+        help="別プロセスに投げず、読み上げ完了まで待つ (デバッグ用。hook が timeout する)",
     )
     add_voice_options(hook_cmd)
 
@@ -339,7 +341,7 @@ def cmd_hook(args: argparse.Namespace) -> int:
     session_key = str(payload.get("session_id") or "default")
     log.info("読み上げ対象 %d 文字 (%s, session=%s)", len(text), reason, session_key[:8])
 
-    if args.sync or not cfg.get("hook.detach", True):
+    if args.sync:
         speak_args = argparse.Namespace(
             **{
                 **vars(args),

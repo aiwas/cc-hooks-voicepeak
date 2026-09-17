@@ -93,8 +93,6 @@ DEFAULTS: dict[str, Any] = {
         "notification_prefix": "",
         # SubagentStop で読み上げるか
         "subagent": False,
-        # true なら hook プロセスは即座に return し、読み上げは別プロセスで継続する
-        "detach": True,
     },
     "log": {
         # null なら $XDG_STATE_HOME/cc-voicepeak/cc-voicepeak.log
