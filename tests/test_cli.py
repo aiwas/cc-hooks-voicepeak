@@ -416,6 +416,76 @@ class HookConfigTest(CliTestCase):
         self.assertTrue(self.recorded_calls())
 
 
+class SafePathTest(CliTestCase):
+    """cwd に置かれたおとりの cc_voicepeak/ が本物より先に import されないこと.
+
+    `python -m` は cwd を sys.path[0] に入れるため、Claude Code が hook を
+    プロジェクトディレクトリで起動すると、そこに置かれた cc_voicepeak/ が
+    PYTHONPATH の本物より先に見つかる。
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.decoy = self.tmp / "decoy"
+        self.marker = self.tmp / "decoy-ran"
+        package = self.decoy / "cc_voicepeak"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "__main__.py").write_text(
+            NL.join(
+                [
+                    "import os, pathlib",
+                    "pathlib.Path(os.environ['DECOY_MARKER']).write_text('decoy')",
+                    "print('DECOY')",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        self.env["DECOY_MARKER"] = str(self.marker)
+        self.env.pop("PYTHONSAFEPATH", None)
+
+    def run_from_decoy(self, command, stdin: str = ""):
+        return subprocess.run(
+            command,
+            input=stdin.encode("utf-8"),
+            capture_output=True,
+            cwd=str(self.decoy),
+            env=self.env,
+            timeout=120,
+        )
+
+    def stop_payload(self, session: str) -> str:
+        path = self.transcript("おとりの確認です。")
+        return json.dumps(
+            {"hook_event_name": "Stop", "session_id": session, "transcript_path": str(path)}
+        )
+
+    def test_decoy_is_picked_up_without_protection(self):
+        # 前提の確認: 何もしなければ cwd のおとりが動く
+        proc = self.run_from_decoy([sys.executable, "-m", "cc_voicepeak", "--version"])
+        self.assertIn("DECOY", proc.stdout.decode("utf-8"))
+        self.assertTrue(self.marker.exists())
+
+    def test_launcher_ignores_decoy_in_cwd(self):
+        launcher = REPO / "bin" / "cc-voicepeak"
+        proc = self.run_from_decoy([str(launcher), "--version"])
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode())
+        self.assertIn("cc-voicepeak", proc.stdout.decode("utf-8"))
+        self.assertNotIn("DECOY", proc.stdout.decode("utf-8"))
+        self.assertFalse(self.marker.exists())
+
+    def test_detached_child_ignores_decoy_in_cwd(self):
+        # 親は -P で守り、環境変数は渡さない。子が守られるのは
+        # spawn_detached() 自身が -P を付けている場合だけ
+        proc = self.run_from_decoy(
+            [sys.executable, "-P", "-m", "cc_voicepeak", "hook"],
+            stdin=self.stop_payload("decoy-detach"),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode())
+        self.assertTrue(self.wait_for_calls(), "別プロセスでの合成が行われていない")
+        self.assertFalse(self.marker.exists(), "デタッチした子がおとりを実行した")
+
+
 class ExitCodeTest(CliTestCase):
     def test_hook_survives_non_cc_voicepeak_exception(self):
         # hook.min_chars が設定ファイル由来だと int() が ValueError を送出する

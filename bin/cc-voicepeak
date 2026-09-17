@@ -28,4 +28,9 @@ fi
 
 export PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
+# `-m` 実行では cwd が sys.path[0] に入り PYTHONPATH より先に探索される。
+# Claude Code は hook をプロジェクトディレクトリを cwd として起動するので、
+# そこに置かれた cc_voicepeak/ が本物より先に import されてしまう。
+# PYTHONSAFEPATH で cwd を外す (`-P` と同じ。古い Python でも起動は失敗しない)。
+export PYTHONSAFEPATH=1
 exec "$python_bin" -m cc_voicepeak "$@"

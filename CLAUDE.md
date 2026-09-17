@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (376 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (379 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -405,6 +405,14 @@ hook のコマンドは `"${CLAUDE_PLUGIN_ROOT}/bin/cc-voicepeak" hook`。
 `bin/cc-voicepeak` は自分の位置から `PYTHONPATH` を通すので、cwd がどこでも動く。
 プラグインの `bin/` は PATH にも追加されるが、依存しないほうが確実なので
 絶対パスで書いている。
+
+`python -m cc_voicepeak` は cwd を `sys.path[0]` に入れ、`PYTHONPATH` より先に
+探索する。Claude Code は hook をプロジェクトディレクトリを cwd として起動するため、
+そこに `cc_voicepeak/` を置いた任意のリポジトリを開くだけで、そのコードが
+Stop のたびに実行されてしまう。ランチャは `PYTHONSAFEPATH=1` を立て、
+`hook.spawn_detached()` は `-P` を付けて cwd を外している（環境変数の継承に
+頼らず、子プロセス側でも明示する）。`tests/test_cli.py` の `SafePathTest` が
+おとりの `cc_voicepeak/` を cwd に置いて本物が動くことを確認する。
 
 `SubagentStop` は hooks.json では登録するが、`hook.subagent` が既定の `false` の
 うちは `resolve_text()` が即スキップする。設定だけで有効にできるようにするため、

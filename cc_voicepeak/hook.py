@@ -106,8 +106,11 @@ def spawn_detached(
     ``--config`` や ``-v`` は ``cc-voicepeak`` 直下のオプションなので、
     サブコマンド名より後ろに置くと argparse が受け付けない。声の指定
     (``-n`` など) は逆に ``speak`` 側のオプションなので後ろに置く。
+
+    ``-P`` は cwd を ``sys.path`` に入れないため。cwd (プロジェクト) に置かれた
+    おとりの ``cc_voicepeak/`` が本物より先に import されるのを防ぐ。
     """
-    command = [sys.executable, "-m", "cc_voicepeak"]
+    command = [sys.executable, "-P", "-m", "cc_voicepeak"]
     command += [str(option) for option in global_options or []]
     command += [
         "speak",
