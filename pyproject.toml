@@ -9,7 +9,7 @@ name = "cc-hooks-voicepeak"
 dynamic = ["version"]
 description = "Claude Code Hooks の結果を VOICEPEAK に読み上げさせる (WSL -> Windows 連携込み)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Miyako Kuwano" }]
@@ -24,10 +24,6 @@ classifiers = [
   "Operating System :: Microsoft :: Windows",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Multimedia :: Sound/Audio :: Speech",
   "Topic :: Utilities",

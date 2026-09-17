@@ -8,7 +8,7 @@ Claude Code が読む `plugin.json` / `marketplace.json` は JSON のため参�
 from __future__ import annotations
 
 import json
-import re
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -36,12 +36,13 @@ class VersionConsistencyTest(unittest.TestCase):
                 self.assertEqual(entry["version"], __version__)
 
     def test_pyproject_does_not_hardcode_version(self):
-        text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
-        # 3.9 には tomllib が無いので文字列で見る
-        self.assertIsNone(re.search(r"(?m)^version\s*=\s*\"", text))
-        self.assertRegex(text, r'(?m)^dynamic\s*=\s*\[\s*"version"\s*\]')
-        self.assertRegex(
-            text, r'(?m)^version\s*=\s*\{\s*attr\s*=\s*"cc_voicepeak\.__version__"\s*\}'
+        with (REPO / "pyproject.toml").open("rb") as fh:
+            pyproject = tomllib.load(fh)
+        self.assertNotIn("version", pyproject["project"])
+        self.assertIn("version", pyproject["project"]["dynamic"])
+        self.assertEqual(
+            pyproject["tool"]["setuptools"]["dynamic"]["version"],
+            {"attr": "cc_voicepeak.__version__"},
         )
 
 

@@ -11,16 +11,16 @@ python3 -m unittest discover -s tests -t .   # テスト全件 (376 件)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
 
 # 下限バージョンでの確認とパッケージング (uv)
-uv run --no-project --python 3.9 python -m unittest discover -s tests -t .
+uv run --no-project --python 3.13 python -m unittest discover -s tests -t .
 uv build                                     # sdist + wheel を dist/ へ
 ```
 
-`requires-python` の下限は 3.9 なので、文法と標準ライブラリだけで判断せず
-`uv run --python 3.9` で実際に通しておく（手元の既定は 3.13）。
+`requires-python` の下限は 3.13。手元の既定がそれより新しい場合は、文法と
+標準ライブラリだけで判断せず `uv run --python 3.13` で実際に通しておく。
 `uv build` は `[build-system]` を見て setuptools を隔離環境へ取得するため、
 環境に setuptools や pip を入れておく必要はない。
 
-依存パッケージは追加しない方針（Python 3.9+ 標準ライブラリのみ）。
+依存パッケージは追加しない方針（Python 3.13+ 標準ライブラリのみ）。
 `tests/fake_voicepeak.py` が本物と同じオプションを受け取り、140 文字超でエラーを返す
 ダミーとして動作するため、Windows も VOICEPEAK も無い環境で分割・直列合成・キャッシュ・
 hook 経路まで通しで検証できる。環境変数で挙動を変えられる。

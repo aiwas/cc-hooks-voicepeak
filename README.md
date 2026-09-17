@@ -7,7 +7,7 @@ Claude Code は WSL、VOICEPEAK は Windows という構成を前提にしてい
 - Markdown の応答を読み上げ向けに整形してから喋らせる
 - VOICEPEAK の「1 回 140 文字まで」という制約を、自然な区切りでの自動分割で吸収する
 - hook は即座に終了するので、読み上げが長くても Claude Code の会話は止まらない
-- 依存パッケージなし（Python 3.9 以上の標準ライブラリのみ）
+- 依存パッケージなし（Python 3.13 以上の標準ライブラリのみ）
 - Claude Code のプラグインとして入れられる（`settings.json` の編集が不要）
 
 実装の詳細や設計の背景は [CLAUDE.md](CLAUDE.md) にまとめてある。
@@ -15,7 +15,7 @@ Claude Code は WSL、VOICEPEAK は Windows という構成を前提にしてい
 ## 必要なもの
 
 - OS : WSL2（Windows 側に VOICEPEAK がインストール済み）
-- Python : 3.9 以上
+- Python : 3.13 以上
 - その他 : WSL interop が有効（`/etc/wsl.conf` の `[interop] enabled=true`, `appendWindowsPath=true`）
 
 WSLg などで WSL 側に音声出力がある環境なら、再生だけを `paplay` / `aplay` / `ffplay`
@@ -250,7 +250,7 @@ JSON にはコメントを書けず、`$comment` のような独自キーは `ch
 
 ```bash
 python3 -m unittest discover -s tests -t .                                    # テスト全件
-uv run --no-project --python 3.9 python -m unittest discover -s tests -t .    # 下限の 3.9 で実行
+uv run --no-project --python 3.13 python -m unittest discover -s tests -t .   # 下限の 3.13 で実行
 ```
 
 Windows も VOICEPEAK も無い環境でも全件実行できる。
