@@ -147,6 +147,69 @@ def _is_recorded_process(pid: int, token: str | None) -> bool:
     return current is None or current == token
 
 
+def _self_identity() -> dict:
+    """状態ファイルに記録する「自分が何者か」."""
+    pid = os.getpid()
+    return {
+        "pid": pid,
+        "pid_token": process_token(pid),
+        # killpg してよい相手かの判定に使う (下記 _may_kill_group)
+        "pgid": os.getpgid(0),
+        "sid": os.getsid(0),
+    }
+
+
+def _may_kill_group(pid: int, state: dict) -> bool:
+    """``pid`` をプロセスグループごと止めてよいか.
+
+    ``setsid`` したプロセスは自分だけの新しいセッションとプロセスグループを
+    持つため ``pid == pgid == sid`` になる。デタッチした読み上げプロセスは
+    この形なので、``killpg`` すれば子の voicepeak.exe やプレイヤも一緒に止まる。
+
+    一方 ``--sync`` の hook は setsid されておらず、起動元 (Claude Code) と
+    同じプロセスグループにいる。ここで ``killpg`` すると起動元ごと落ちるので、
+    その場合は対象 1 プロセスだけを止める (子は ``win_pid`` の taskkill と
+    プロセス終了に伴う後始末に委ねる)。
+
+    判定は ``/proc`` の現在値で行い、記録値とも突き合わせる。状態ファイルは
+    書き換えられ得るので、記録値だけを信用して ``killpg`` の可否を決めない。
+    """
+    try:
+        pgid = os.getpgid(pid)
+        sid = os.getsid(pid)
+    except OSError:
+        return False
+    if pid != pgid or pid != sid:
+        return False
+    # 自分と同じグループなら、割り込む側まで巻き込むので許可しない
+    try:
+        if pgid == os.getpgid(0):
+            return False
+    except OSError:
+        return False
+    # 記録時と食い違っていれば、PID 再利用か状態ファイルの改変を疑う
+    for key, value in (("pgid", pgid), ("sid", sid)):
+        recorded = state.get(key)
+        if recorded is not None and recorded != value:
+            return False
+    return True
+
+
+def _signal_process(pid: int, sig: int, group: bool) -> bool:
+    """``pid`` にシグナルを送る. 送れたら True."""
+    if group:
+        try:
+            os.killpg(os.getpgid(pid), sig)
+            return True
+        except OSError:
+            pass  # グループへ送れなければ単体で送る
+    try:
+        os.kill(pid, sig)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
 def taskkill(win_pid: int) -> bool:
     """Windows 側のプロセスを止める (WSL からの割り込み用). 止めたら True."""
     try:
@@ -191,16 +254,14 @@ class SpeechSlot:
         return data
 
     def write(self, **fields) -> None:
-        pid = os.getpid()
-        data = {"pid": pid, "pid_token": process_token(pid), "started": time.time()}
+        data = {**_self_identity(), "started": time.time()}
         data.update(fields)
         self._atomic_write(data)
 
     def update(self, **fields) -> None:
         current = self.read() or {}
         current.update(fields)
-        current["pid"] = os.getpid()
-        current["pid_token"] = process_token(current["pid"])
+        current.update(_self_identity())
         self._atomic_write(current)
 
     def _atomic_write(self, data: dict) -> None:
@@ -243,14 +304,12 @@ class SpeechSlot:
         # PID 再利用で無関係なプロセスグループを止めないよう、記録時の
         # starttime と照合してから kill する (read() が妥当性を検査済み)
         if pid != os.getpid() and _is_recorded_process(pid, state.get("pid_token")):
+            # setsid 済みのプロセスだけグループごと止める。同期経路の hook は
+            # 起動元と同じグループにいるため、巻き込むと Claude Code が落ちる
+            group = _may_kill_group(pid, state)
             for sig in (signal.SIGTERM, signal.SIGKILL):
-                try:
-                    os.killpg(os.getpgid(pid), sig)
-                except (ProcessLookupError, PermissionError, OSError):
-                    try:
-                        os.kill(pid, sig)
-                    except (ProcessLookupError, PermissionError):
-                        break
+                if not _signal_process(pid, sig, group):
+                    break
                 killed = True
                 for _ in range(20):
                     if not pid_alive(pid):

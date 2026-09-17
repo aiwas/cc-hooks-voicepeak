@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (381 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (385 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -371,6 +371,15 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
   止めないため。`pid_token` の無い状態ファイルは古いものとして扱い、kill しない
   （生存確認だけで信用すると `{"pid": <他人の pid>}` を置かれただけで kill が飛ぶ）。
   `pid` は `type(pid) is int and pid > 1` で検査する（`isinstance` は `bool` も通す）
+- **`killpg` は `setsid` 済みの相手にだけ使う。** デタッチした読み上げプロセスは
+  `start_new_session=True` で自分だけのセッションとグループを持つため
+  `pid == pgid == sid` になり、グループごと止めれば子の voicepeak.exe や
+  プレイヤも一緒に終わる。一方 `--sync` の hook は setsid されておらず起動元
+  （Claude Code）と同じグループにいるので、`killpg` すると起動元ごと落ちる。
+  `_may_kill_group()` が `/proc` の現在値で `pid == pgid == sid` と
+  「自分のグループでないこと」を確かめ、満たさなければ `os.kill()` で
+  対象 1 プロセスだけを止める。状態ファイルに記録した `pgid` / `sid` とも
+  突き合わせる（記録値だけを信用すると、書き換えでグループ kill を誘発できる）
 - ランタイムディレクトリ（`locking.runtime_dir()`）は `$XDG_RUNTIME_DIR/cc-voicepeak`、
   無ければログと同じ `$XDG_STATE_HOME/cc-voicepeak/run`。`/tmp` には落とさない。
   作業ディレクトリと同じく `fsutil.ensure_private_dir()` で「シンボリックリンクでない・

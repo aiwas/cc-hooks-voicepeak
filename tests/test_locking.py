@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,7 @@ from cc_voicepeak.errors import LockTimeout, RuntimeDirError
 from cc_voicepeak.locking import (
     ExeLock,
     SpeechSlot,
+    pid_alive,
     process_token,
     runtime_dir,
     taskkill,
@@ -74,6 +76,52 @@ class SlotTestCase(unittest.TestCase):
             time.sleep(0.05)
         return False
 
+    @staticmethod
+    def kill_pid(pid: int) -> None:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+    @staticmethod
+    def wait_for_pid_exit(pid: int, timeout: float = 10.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not pid_alive(pid):
+                return True
+            time.sleep(0.05)
+        return False
+
+    def group_with_two_processes(self, reap: bool):
+        """setsid した親と、同じプロセスグループにいる子を作る.
+
+        Claude Code (親) と、そこから起動された setsid 無しの hook (子) の
+        関係を再現する。``reap`` を立てると親は子を待って刈り取るので、
+        子を止めたあとに PID がゾンビとして残らない。
+        """
+        tail = "child.wait(); time.sleep(30)" if reap else "time.sleep(30)"
+        script = (
+            "import subprocess, sys, time;"
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']);"
+            "print(child.pid, flush=True);" + tail
+        )
+        parent = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            start_new_session=True,
+        )
+        self.addCleanup(self.stop_child, parent)
+        child_pid = int(parent.stdout.readline().decode().strip())
+        self.addCleanup(self.kill_pid, child_pid)
+        return parent, child_pid
+
+    def slot_for_pid(self, key: str, pid: int) -> SpeechSlot:
+        slot = SpeechSlot(key)
+        slot.path.write_text(
+            json.dumps({"pid": pid, "pid_token": process_token(pid)}), encoding="utf-8"
+        )
+        return slot
+
 
 class SpeechSlotTest(SlotTestCase):
     def test_runtime_dir_is_created(self):
@@ -112,6 +160,52 @@ class SpeechSlotTest(SlotTestCase):
         slot, child = self.occupied_slot("s4")
         self.assertTrue(slot.interrupt())
         self.assertTrue(self.wait_for_exit(child), "プロセスが終了していない")
+
+    def test_interrupt_spares_the_group_of_a_process_without_setsid(self):
+        """setsid されていない相手は単体で止める.
+
+        --sync の hook は起動元 (Claude Code) と同じプロセスグループにいるため、
+        killpg すると起動元ごと落ちる。
+        """
+        parent, child_pid = self.group_with_two_processes(reap=True)
+        slot = self.slot_for_pid("pg1", child_pid)
+        self.assertTrue(slot.interrupt())
+        self.assertTrue(self.wait_for_pid_exit(child_pid), "対象プロセスが終了していない")
+        self.assertIsNone(parent.poll(), "起動元のプロセスグループを巻き込んだ")
+
+    def test_interrupt_kills_the_whole_group_of_a_detached_process(self):
+        """setsid 済みの相手はグループごと止める (子の合成・再生も巻き取る)."""
+        parent, child_pid = self.group_with_two_processes(reap=False)
+        slot = self.slot_for_pid("pg2", parent.pid)
+        self.assertTrue(slot.interrupt())
+        self.assertTrue(self.wait_for_exit(parent), "対象プロセスが終了していない")
+        self.assertTrue(self.wait_for_pid_exit(child_pid), "グループの子が残った")
+
+    def test_interrupt_refuses_a_recorded_group_that_no_longer_matches(self):
+        """記録した pgid / sid と現在値が食い違うときはグループごと止めない."""
+        parent, child_pid = self.group_with_two_processes(reap=False)
+        slot = SpeechSlot("pg3")
+        slot.path.write_text(
+            json.dumps(
+                {
+                    "pid": parent.pid,
+                    "pid_token": process_token(parent.pid),
+                    "pgid": parent.pid + 1,  # 記録と現在値がずれている
+                    "sid": parent.pid,
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.assertTrue(slot.interrupt())
+        self.assertTrue(self.wait_for_exit(parent), "対象プロセスが終了していない")
+        self.assertTrue(pid_alive(child_pid), "グループごと止めてしまった")
+
+    def test_write_records_the_process_group_and_session(self):
+        slot = SpeechSlot("pg4")
+        slot.write()
+        state = slot.read()
+        self.assertEqual(state["pgid"], os.getpgid(0))
+        self.assertEqual(state["sid"], os.getsid(0))
 
     def test_state_without_token_is_stale_and_never_killed(self):
         """pid_token の無い状態ファイルは古いものとして扱い、kill しない.
