@@ -5,7 +5,7 @@
 ## 開発コマンド
 
 ```bash
-python3 -m unittest discover -s tests -t .   # テスト全件 (373 件)
+python3 -m unittest discover -s tests -t .   # テスト全件 (376 件)
 ./bin/cc-voicepeak check --notes             # WSL 連携の注意点
 ./bin/cc-voicepeak split -f notes.md         # 分割結果だけ確認 (合成しない)
 ./bin/cc-voicepeak -v speak "テスト" --dry-run   # -v はサブコマンドより前
@@ -250,9 +250,10 @@ Claude の応答は Markdown なので、そのまま読ませると聞き取れ
 （Python の `\b` は日本語文字も語中文字として扱う）。日本語に挟まれた略語も
 読み替えたい場合は `(?i)PR` のように `\b` を外したパターンを設定する。
 
-`normalize()` を直接呼ぶときの既定は `DEFAULT_OPTIONS` で、`replacements` は空。
-設定ファイル側の既定値（`config.DEFAULTS`）とは別物なので、両方を直す必要がある。
-未知の列挙値（`tables="???"` など）は `_choice()` が既定値に倒す。null は
+整形オプションの既定値の正本は `normalize.DEFAULT_OPTIONS`。設定側の
+`config.DEFAULTS["normalize"]` はそこに `enabled` を足して `deepcopy` したものなので、
+キーを足すときは `DEFAULT_OPTIONS` だけ直す（`normalize()` を直接呼んでも
+アプリ経由と同じ既定で動く）。未知の列挙値（`tables="???"` など）は `_choice()` が既定値に倒す。null は
 「空文字／無効」として採用する（既定値には戻さない）。
 
 処理順で気をつける点が 3 つある。
@@ -434,7 +435,8 @@ README のインストール手順、`commands/*.md` の相互参照（`/voicepe
 
 ## 設定の仕組み
 
-`config.py` の `DEFAULTS` が設定側の既定値定義（`normalize.DEFAULT_OPTIONS` とは別）。
+`config.py` の `DEFAULTS` が設定側の既定値定義（`normalize` セクションだけは
+`normalize.DEFAULT_OPTIONS` から派生させている）。
 読み込み順は README の通りで、`_merge_files()` がファイルを `_deep_merge()` で再帰
 マージし、`_ENV_MAP` の環境変数、`--config` のファイル、最後に CLI 引数を重ねる。
 `--config` を環境変数より後に置いているのは、これがコマンドライン引数だから。

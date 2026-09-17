@@ -5,15 +5,26 @@ from __future__ import annotations
 import unittest
 
 from cc_voicepeak.config import DEFAULTS
-from cc_voicepeak.normalize import normalize
+from cc_voicepeak.normalize import DEFAULT_OPTIONS, normalize
 
 NL = chr(10)
 
 
 def run(text: str, **options) -> str:
-    opts = dict(DEFAULTS["normalize"])
-    opts.update(options)
-    return normalize(text, opts)
+    return normalize(text, options)
+
+
+class DefaultOptionsTest(unittest.TestCase):
+    def test_config_defaults_derive_from_normalize(self):
+        expected = {"enabled": True, **DEFAULT_OPTIONS}
+        self.assertEqual(DEFAULTS["normalize"], expected)
+
+    def test_config_defaults_do_not_share_mutable_values(self):
+        self.assertIsNot(DEFAULTS["normalize"]["replacements"], DEFAULT_OPTIONS["replacements"])
+
+    def test_direct_call_applies_default_replacements(self):
+        # 設定を経由しない直接呼び出しでも読み替え辞書が適用される
+        self.assertEqual(normalize("PR を作成しました。"), "プルリクを作成しました。")
 
 
 class NormalizeTest(unittest.TestCase):

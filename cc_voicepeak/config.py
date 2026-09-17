@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from .errors import ConfigError
+from .normalize import DEFAULT_OPTIONS as _NORMALIZE_DEFAULTS
 
 # voicepeak が 1 回の起動で受け付ける最大文字数。
 # 141 文字以上を渡すとエラーになり wav が出力されないため、既定は安全側の 140。
@@ -62,31 +63,10 @@ DEFAULTS: Dict[str, Any] = {
         "drop_empty": True,
     },
     # ---- 読み上げ用テキスト整形 ------------------------------------------
-    "normalize": {
-        "enabled": True,
-        # コードブロックの扱い: "drop" / "placeholder" / "read"
-        "code_blocks": "placeholder",
-        "code_block_placeholder": "コードブロック。",
-        # インラインコードのバッククォートを外して中身は読む
-        "inline_code": "read",
-        "strip_urls": True,
-        "url_placeholder": "リンク",
-        # /a/b/c.py -> c.py
-        "shorten_paths": True,
-        "strip_emoji": True,
-        # 表の扱い: "drop" / "read"
-        "tables": "drop",
-        "max_total_chars": 0,      # 0 なら無制限
-        "truncated_suffix": "以下省略。",
-        # 読み替え辞書 (正規表現 -> 読み)。上から順に適用。
-        "replacements": [
-            ["(?i)\\bPR\\b", "プルリク"],
-            ["(?i)\\bCI\\b", "シーアイ"],
-            ["(?i)\\bWSL\\b", "ダブリューエスエル"],
-            ["(?i)\\bLGTM\\b", "オッケー"],
-            ["(?i)\\bTODO\\b", "トゥドゥ"],
-        ],
-    },
+    # 各キーの既定値と説明は normalize.DEFAULT_OPTIONS を正本とする。
+    # `replacements` がリストなので deepcopy で切り離す (共有すると片方への
+    # 変更がもう片方に漏れる)。`enabled` だけは normalize() が見ない設定側のキー。
+    "normalize": {"enabled": True, **copy.deepcopy(_NORMALIZE_DEFAULTS)},
     # ---- 再生 -----------------------------------------------------------
     "player": {
         # "auto" / "powershell" / "paplay" / "aplay" / "ffplay" / "none"

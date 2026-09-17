@@ -79,18 +79,31 @@ _ARROW_OTHER = "←↑↓↔⇐⇑⇓⇔⟵⟷"
 _ARROW_FROM_RE = re.compile(f"[{_ARROW_FROM}]")
 _ARROW_OTHER_RE = re.compile(f"[{_ARROW_OTHER}]")
 
+# 整形オプションの既定値。設定側 (config.DEFAULTS["normalize"]) はここから派生する
+# ので、キーを足すときはここだけ直す (`enabled` は pipeline が見る設定側だけのキー)。
 DEFAULT_OPTIONS: Dict[str, object] = {
+    # コードブロックの扱い: "drop" / "placeholder" / "read"
     "code_blocks": "placeholder",
     "code_block_placeholder": "コードブロック。",
+    # インラインコードのバッククォートを外して中身は読む: "read" / "drop"
     "inline_code": "read",
     "strip_urls": True,
     "url_placeholder": "リンク",
+    # /a/b/c.py -> c.py
     "shorten_paths": True,
     "strip_emoji": True,
+    # 表の扱い: "drop" / "read"
     "tables": "drop",
-    "max_total_chars": 0,
+    "max_total_chars": 0,      # 0 なら無制限
     "truncated_suffix": "以下省略。",
-    "replacements": [],
+    # 読み替え辞書 (正規表現 -> 読み)。上から順に適用。
+    "replacements": [
+        ["(?i)\\bPR\\b", "プルリク"],
+        ["(?i)\\bCI\\b", "シーアイ"],
+        ["(?i)\\bWSL\\b", "ダブリューエスエル"],
+        ["(?i)\\bLGTM\\b", "オッケー"],
+        ["(?i)\\bTODO\\b", "トゥドゥ"],
+    ],
 }
 
 
