@@ -16,9 +16,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional
 
 from .bridge import Bridge, detect_bridge, resolve_exe
 from .config import Config
@@ -27,19 +27,19 @@ from .logging_util import get_logger
 from .normalize import normalize
 from .player import Player, select_player
 from .splitter import split_text, text_width
-from .synth import SynthResult, Synthesizer, VoiceParams
+from .synth import Synthesizer, SynthResult, VoiceParams
 from .wavutil import concat_wavs
 
 log = get_logger("pipeline")
 
 
-@dataclass
+@dataclass(slots=True)
 class SpeakReport:
     """1 回の読み上げの結果."""
 
-    blocks: List[str] = field(default_factory=list)
-    results: List[SynthResult] = field(default_factory=list)
-    output: Optional[Path] = None
+    blocks: list[str] = field(default_factory=list)
+    results: list[SynthResult] = field(default_factory=list)
+    output: Path | None = None
     elapsed: float = 0.0
     cancelled: bool = False
     player: str = ""
@@ -49,7 +49,7 @@ class SpeakReport:
         return sum(1 for result in self.results if result.ok)
 
     @property
-    def errors(self) -> List[str]:
+    def errors(self) -> list[str]:
         return [
             f"#{result.index}: {result.error}" for result in self.results if result.error
         ]
@@ -79,7 +79,7 @@ def build_voice_params(cfg: Config) -> VoiceParams:
     )
 
 
-def prepare_blocks(text: str, cfg: Config) -> List[str]:
+def prepare_blocks(text: str, cfg: Config) -> list[str]:
     """整形と分割だけを行う (``--dry-run`` からも使う)."""
     if cfg.get("normalize.enabled", True):
         text = normalize(text, cfg.section("normalize"))
@@ -93,7 +93,7 @@ def prepare_blocks(text: str, cfg: Config) -> List[str]:
     )
 
 
-def build_synthesizer(cfg: Config, bridge: Optional[Bridge] = None) -> Synthesizer:
+def build_synthesizer(cfg: Config, bridge: Bridge | None = None) -> Synthesizer:
     bridge = bridge or detect_bridge()
     exe = resolve_exe(bridge, cfg.get("voicepeak.exe"))
     return Synthesizer(
@@ -112,11 +112,11 @@ def build_synthesizer(cfg: Config, bridge: Optional[Bridge] = None) -> Synthesiz
 def speak(
     text: str,
     cfg: Config,
-    bridge: Optional[Bridge] = None,
-    player: Optional[Player] = None,
-    out_path: Optional[Path] = None,
-    on_progress: Optional[Callable[[SynthResult, int], None]] = None,
-    should_cancel: Optional[Callable[[], bool]] = None,
+    bridge: Bridge | None = None,
+    player: Player | None = None,
+    out_path: Path | None = None,
+    on_progress: Callable[[SynthResult, int], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
     keep_files: bool = False,
 ) -> SpeakReport:
     """``text`` を読み上げる (合成は直列・再生は順次).
@@ -222,7 +222,7 @@ def speak(
     return report
 
 
-def synth_to_file(text: str, cfg: Config, dest: Path, bridge: Optional[Bridge] = None) -> SpeakReport:
+def synth_to_file(text: str, cfg: Config, dest: Path, bridge: Bridge | None = None) -> SpeakReport:
     """再生せず 1 本の wav にまとめて保存する."""
     report = speak(text, cfg, bridge=bridge, out_path=Path(dest), keep_files=True)
     if report.output is None and report.blocks:

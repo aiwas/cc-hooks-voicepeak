@@ -306,15 +306,16 @@ class AcquireTest(SlotTestCase):
 
 class ExeLockTest(SlotTestCase):
     def test_lock_is_exclusive_across_processes(self):
+        repo = str(Path(__file__).resolve().parent.parent)
         script = (
             "import os, sys, time;"
-            "sys.path.insert(0, %r);"
+            f"sys.path.insert(0, {repo!r});"
             "from cc_voicepeak.locking import ExeLock;"
             "lock = ExeLock('test.lock');"
             "lock.__enter__();"
             "print('acquired', flush=True);"
             "time.sleep(2);"
-            "lock.__exit__()" % str(Path(__file__).resolve().parent.parent)
+            "lock.__exit__()"
         )
         child = subprocess.Popen(
             [sys.executable, "-c", script],

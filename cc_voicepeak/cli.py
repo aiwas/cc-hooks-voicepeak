@@ -16,7 +16,6 @@ import signal
 import sys
 import threading
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 from . import __version__
 from .bridge import detect_bridge
@@ -154,9 +153,9 @@ _VOICE_FLAGS = (
 )
 
 
-def _detach_options(args: argparse.Namespace) -> Tuple[List[str], List[str]]:
+def _detach_options(args: argparse.Namespace) -> tuple[list[str], list[str]]:
     """デタッチした読み上げプロセスへ引き継ぐ (グローバル引数, speak 引数)."""
-    global_options: List[str] = []
+    global_options: list[str] = []
     for path in getattr(args, "config", None) or []:
         global_options += ["--config", str(path)]
     if getattr(args, "verbose", False):
@@ -164,7 +163,7 @@ def _detach_options(args: argparse.Namespace) -> Tuple[List[str], List[str]]:
     if getattr(args, "log_level", None):
         global_options += ["--log-level", str(args.log_level)]
 
-    speak_options: List[str] = []
+    speak_options: list[str] = []
     for flag, name in _VOICE_FLAGS:
         value = getattr(args, name, None)
         if value is not None:
@@ -203,7 +202,7 @@ def _read_text(args: argparse.Namespace) -> str:
 # ---------------------------------------------------------------------------
 # 各コマンド
 # ---------------------------------------------------------------------------
-def cmd_split(args: argparse.Namespace, text: Optional[str] = None) -> int:
+def cmd_split(args: argparse.Namespace, text: str | None = None) -> int:
     cfg = _load(args)
     text = _read_text(args) if text is None else text
     blocks = prepare_blocks(text, cfg)
@@ -238,7 +237,7 @@ def cmd_split(args: argparse.Namespace, text: Optional[str] = None) -> int:
     return 0
 
 
-def cmd_speak(args: argparse.Namespace, text: Optional[str] = None) -> int:
+def cmd_speak(args: argparse.Namespace, text: str | None = None) -> int:
     cfg = _load(args)
     text = _read_text(args) if text is None else text
     if not text.strip():
@@ -461,7 +460,7 @@ _COMMANDS = {
 }
 
 
-def _invoked_as_hook(argv: Optional[List[str]]) -> bool:
+def _invoked_as_hook(argv: list[str] | None) -> bool:
     """引数解析に失敗した場合でも hook 起動かどうかを判定する。
 
     `args.command` が得られないため生の argv を見る。
@@ -469,7 +468,7 @@ def _invoked_as_hook(argv: Optional[List[str]]) -> bool:
     return "hook" in (sys.argv[1:] if argv is None else argv)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)

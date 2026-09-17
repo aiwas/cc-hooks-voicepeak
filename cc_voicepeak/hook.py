@@ -18,8 +18,9 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any
 
 from .config import Config
 from .logging_util import get_logger
@@ -30,7 +31,7 @@ log = get_logger("hook")
 DETACH_ENV = "CC_VOICEPEAK_DETACHED"
 
 
-def read_payload(stream=None) -> Dict[str, Any]:
+def read_payload(stream=None) -> dict[str, Any]:
     """hook の stdin (JSON) を読む. JSON でなければ ``{"message": <生テキスト>}``."""
     stream = stream or sys.stdin
     if stream is None:
@@ -55,7 +56,7 @@ def read_payload(stream=None) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {"message": str(payload)}
 
 
-def resolve_text(payload: Dict[str, Any], cfg: Config) -> Tuple[Optional[str], str]:
+def resolve_text(payload: dict[str, Any], cfg: Config) -> tuple[str | None, str]:
     """``(読み上げるテキスト, 理由)`` を返す. テキストが None ならスキップ."""
     event = str(payload.get("hook_event_name") or "")
     events = cfg.get("hook.events", []) or []
@@ -98,8 +99,8 @@ def spawn_detached(
     text: str,
     session_key: str,
     cfg: Config,
-    global_options: Optional[Sequence[str]] = None,
-    speak_options: Optional[Sequence[str]] = None,
+    global_options: Sequence[str] | None = None,
+    speak_options: Sequence[str] | None = None,
 ) -> int:
     """読み上げ本体を別プロセスとして起動し、その pid を返す.
 
@@ -140,7 +141,7 @@ def spawn_detached(
     return proc.pid
 
 
-def _write_stdin(proc: "subprocess.Popen", data: bytes, timeout: float = 5.0) -> None:
+def _write_stdin(proc: subprocess.Popen, data: bytes, timeout: float = 5.0) -> None:
     """子プロセスの標準入力へ本文を渡す.
 
     本文がパイプバッファ (通常 64KB) を超えると、子が読み進めるまで write が

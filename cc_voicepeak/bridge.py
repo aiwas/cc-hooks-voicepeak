@@ -24,8 +24,8 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Dict, Iterator, Optional
 
 from .errors import BridgeError
 from .fsutil import ensure_private_dir
@@ -85,7 +85,7 @@ def interop_enabled() -> bool:
     return False
 
 
-def env_temp_root() -> Optional[Path]:
+def env_temp_root() -> Path | None:
     """``CC_VOICEPEAK_TEMP`` による作業ディレクトリの明示指定.
 
     ブリッジの種類によらず ``temp_root()`` を呼ぶ時点で評価する
@@ -133,10 +133,10 @@ class Bridge:
         """Windows EXE を起動するときの cwd (Linux 側から見たパス)."""
         raise NotImplementedError
 
-    def find_voicepeak(self) -> Optional[Path]:
+    def find_voicepeak(self) -> Path | None:
         raise NotImplementedError
 
-    def popen_env(self) -> Dict[str, str]:
+    def popen_env(self) -> dict[str, str]:
         return dict(os.environ)
 
 
@@ -148,9 +148,9 @@ class LocalBridge(Bridge):
 
     name = "local"
 
-    def __init__(self, temp_root: Optional[Path] = None, exe: Optional[Path] = None):
+    def __init__(self, temp_root: Path | None = None, exe: Path | None = None):
         self._explicit_temp = Path(temp_root) if temp_root else None
-        self._temp_root: Optional[Path] = None
+        self._temp_root: Path | None = None
         self._exe = Path(exe) if exe else None
 
     def to_win(self, path: os.PathLike | str) -> str:
@@ -167,7 +167,7 @@ class LocalBridge(Bridge):
     def exec_cwd(self) -> str:
         return str(self.temp_root())
 
-    def find_voicepeak(self) -> Optional[Path]:
+    def find_voicepeak(self) -> Path | None:
         if self._exe and self._exe.exists():
             return self._exe
         found = shutil.which("voicepeak")
@@ -180,8 +180,8 @@ class WslBridge(Bridge):
     name = "wsl"
 
     def __init__(self) -> None:
-        self._win_cache: Dict[str, str] = {}
-        self._temp_root: Optional[Path] = None
+        self._win_cache: dict[str, str] = {}
+        self._temp_root: Path | None = None
 
     # -- パス変換 ---------------------------------------------------------
     def to_win(self, path: os.PathLike | str) -> str:
@@ -290,7 +290,7 @@ class WslBridge(Bridge):
         if user:
             yield Path(f"{WIN_USERS_DIR}/{user}/AppData/Local/Temp")
 
-    def _query_windows_env(self, name: str) -> Optional[str]:
+    def _query_windows_env(self, name: str) -> str | None:
         try:
             proc = subprocess.run(
                 ["cmd.exe", "/d", "/c", f"echo %{name}%"],
@@ -311,7 +311,7 @@ class WslBridge(Bridge):
         return result
 
     # -- voicepeak.exe の探索 ---------------------------------------------
-    def find_voicepeak(self) -> Optional[Path]:
+    def find_voicepeak(self) -> Path | None:
         for root in WIN_DRIVE_ROOTS:
             drive = Path(root)
             if not drive.is_dir():
@@ -342,7 +342,7 @@ def _cache_dir() -> Path:
     return (Path(base) if base else Path.home() / ".cache") / "cc-voicepeak"
 
 
-def _read_cached_wintemp() -> Optional[Path]:
+def _read_cached_wintemp() -> Path | None:
     path = _cache_dir() / "wintemp"
     try:
         value = path.read_text(encoding="utf-8").strip()
@@ -360,7 +360,7 @@ def _write_cached_wintemp(value: Path) -> None:
         pass
 
 
-def detect_bridge(force: Optional[str] = None) -> Bridge:
+def detect_bridge(force: str | None = None) -> Bridge:
     """環境から適切なブリッジを選ぶ.
 
     ``force`` に ``"wsl"`` / ``"local"`` を渡すと固定できる
@@ -376,7 +376,7 @@ def detect_bridge(force: Optional[str] = None) -> Bridge:
     return WslBridge() if is_wsl() else LocalBridge()
 
 
-def resolve_exe(bridge: Bridge, configured: Optional[str]) -> Path:
+def resolve_exe(bridge: Bridge, configured: str | None) -> Path:
     """設定または自動探索で voicepeak の実体パスを決める."""
     if configured:
         raw = str(configured).strip()

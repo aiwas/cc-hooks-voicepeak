@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shutil
-import struct
 import tempfile
 import unittest
 import wave

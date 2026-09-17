@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import json
 from collections import deque
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
 from .logging_util import get_logger
 
@@ -28,7 +29,7 @@ log = get_logger("transcript")
 SKIP_BLOCK_TYPES = {"thinking", "redacted_thinking", "tool_use", "tool_result", "image"}
 
 
-def iter_entries(path: Path) -> Iterator[Dict[str, Any]]:
+def iter_entries(path: Path) -> Iterator[dict[str, Any]]:
     """JSONL を 1 行ずつ dict にして返す (壊れた行は飛ばす)."""
     try:
         with Path(path).open(encoding="utf-8", errors="replace") as handle:
@@ -46,7 +47,7 @@ def iter_entries(path: Path) -> Iterator[Dict[str, Any]]:
         log.warning("トランスクリプトを読めません: %s (%s)", path, exc)
 
 
-def extract_text(message: Dict[str, Any]) -> str:
+def extract_text(message: dict[str, Any]) -> str:
     """assistant メッセージから読み上げ対象のテキストを取り出す."""
     content = message.get("content")
     if isinstance(content, str):
@@ -54,7 +55,7 @@ def extract_text(message: Dict[str, Any]) -> str:
     if not isinstance(content, list):
         return ""
 
-    parts: List[str] = []
+    parts: list[str] = []
     for block in content:
         if not isinstance(block, dict):
             continue
@@ -70,7 +71,7 @@ def last_assistant_text(
     path: Path,
     include_sidechain: bool = False,
     max_lookback: int = 400,
-) -> Optional[str]:
+) -> str | None:
     """最後のアシスタント応答 (テキストを含むもの) を返す.
 
     ``max_lookback`` 件しか見ないので、JSONL 全体をメモリへ読む必要はない
@@ -97,9 +98,9 @@ def last_assistant_text(
     return None
 
 
-def session_summary(path: Path) -> Dict[str, Any]:
+def session_summary(path: Path) -> dict[str, Any]:
     """デバッグ用: トランスクリプトの概要."""
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     total = 0
     for entry in iter_entries(path):
         total += 1

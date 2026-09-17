@@ -44,5 +44,12 @@ packages = ["cc_voicepeak"]
 [tool.setuptools.dynamic]
 version = { attr = "cc_voicepeak.__version__" }
 
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+# UP: 3.13 で使える記法へ (PEP 585/604 の型注釈など) / F: 未使用 import など / I: import の並び
+select = ["F", "I", "UP"]
+
 [tool.setuptools.package-data]
 cc_voicepeak = ["py.typed"]

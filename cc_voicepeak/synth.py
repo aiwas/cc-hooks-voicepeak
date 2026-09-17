@@ -14,9 +14,9 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Sequence
 
 from .bridge import Bridge
 from .errors import LockTimeout, SynthError
@@ -41,13 +41,13 @@ def _is_permanent(exc: SynthError) -> bool:
     return bool(_PERMANENT_ERROR.search(str(exc)))
 
 
-def redact_command(command: Sequence[str]) -> List[str]:
+def redact_command(command: Sequence[str]) -> list[str]:
     """``-s`` の値を長さとハッシュに置き換えたコマンド表現.
 
     そのまま出すと ``log.level=debug`` でアシスタント応答の全文が
     ログファイルに平文で蓄積される。
     """
-    out: List[str] = []
+    out: list[str] = []
     redact_next = False
     for token in command:
         if redact_next:
@@ -86,7 +86,7 @@ def _owner_alive(entry: Path) -> bool:
 
 
 def prune_work_dirs(
-    root: Path, keep: Optional[Path] = None, max_age: float = WORK_DIR_MAX_AGE
+    root: Path, keep: Path | None = None, max_age: float = WORK_DIR_MAX_AGE
 ) -> int:
     """終了したプロセスが残した作業ディレクトリを消し、消した数を返す.
 
@@ -117,17 +117,17 @@ def prune_work_dirs(
     return removed
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class VoiceParams:
     """voicepeak に渡す声のパラメータ."""
 
-    narrator: Optional[str] = None
-    emotion: Optional[str] = None
-    speed: Optional[int] = None
-    pitch: Optional[int] = None
+    narrator: str | None = None
+    emotion: str | None = None
+    speed: int | None = None
+    pitch: int | None = None
 
-    def args(self) -> List[str]:
-        args: List[str] = []
+    def args(self) -> list[str]:
+        args: list[str] = []
         if self.narrator:
             args += ["-n", str(self.narrator)]
         if self.emotion:
@@ -144,14 +144,14 @@ class VoiceParams:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class SynthResult:
     index: int
     text: str
     path: Path
     cached: bool = False
     elapsed: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
     success: bool = False
     command: Sequence[str] = field(default_factory=tuple)
 
@@ -167,7 +167,7 @@ def prepare_block(text: str) -> str:
     改行はそのまま渡すと環境によって扱いが変わるため、読点に寄せて 1 行にする。
     """
     text = _CONTROL.sub(" ", text)
-    out: List[str] = []
+    out: list[str] = []
     for ch in text:
         if ch == NEWLINE:
             if out and out[-1] in _SENTENCE_TAIL:
@@ -188,14 +188,14 @@ class Synthesizer:
         self,
         exe: Path,
         bridge: Bridge,
-        params: Optional[VoiceParams] = None,
+        params: VoiceParams | None = None,
         char_limit: int = 140,
         input_mode: str = "say",
         timeout: int = 120,
         retries: int = 1,
         use_cache: bool = True,
         cache_max_files: int = 400,
-        work_dir: Optional[Path] = None,
+        work_dir: Path | None = None,
     ):
         self.exe = Path(exe)
         self.bridge = bridge
@@ -221,7 +221,7 @@ class Synthesizer:
 
     # -- キャッシュ --------------------------------------------------------
     def _cache_path(self, text: str) -> Path:
-        digest = hashlib.sha1(f"{self.params.key()} {text}".encode("utf-8")).hexdigest()
+        digest = hashlib.sha1(f"{self.params.key()} {text}".encode()).hexdigest()
         return self.cache_dir / f"{digest}.wav"
 
     def _store_cache(self, text: str, source: Path) -> None:
@@ -259,7 +259,7 @@ class Synthesizer:
                 pass
 
     # -- 合成 --------------------------------------------------------------
-    def _attempt_modes(self, text: str) -> List[str]:
+    def _attempt_modes(self, text: str) -> list[str]:
         """試行するモードの並びを返す (``retries + 1`` 件).
 
         以前は fallback だけを ``retries`` 回繰り返しており、元のモードが
@@ -276,7 +276,7 @@ class Synthesizer:
             modes.append(other if len(modes) % 2 else primary)
         return modes
 
-    def synth_block(self, index: int, text: str, out_path: Optional[Path] = None) -> SynthResult:
+    def synth_block(self, index: int, text: str, out_path: Path | None = None) -> SynthResult:
         prepared = prepare_block(text)
         if not prepared:
             return SynthResult(index, text, Path(), error="空のブロック")
@@ -347,8 +347,8 @@ class Synthesizer:
         return SynthResult(index, prepared, target, error=last_error, command=command)
 
     def _run(self, text: str, target: Path, mode: str) -> Sequence[str]:
-        command: List[str] = [str(self.exe)]
-        text_file: Optional[Path] = None
+        command: list[str] = [str(self.exe)]
+        text_file: Path | None = None
 
         if mode == "text_file":
             text_file = target.with_suffix(".txt")
@@ -435,11 +435,11 @@ class Synthesizer:
     def check(self) -> str:
         return self._simple_run("--help")
 
-    def list_narrators(self) -> List[str]:
+    def list_narrators(self) -> list[str]:
         output = self._simple_run("--list-narrator")
         return [line.strip() for line in output.splitlines() if line.strip()]
 
-    def list_emotions(self, narrator: str) -> List[str]:
+    def list_emotions(self, narrator: str) -> list[str]:
         output = self._simple_run("--list-emotion", narrator)
         return [line.strip() for line in output.splitlines() if line.strip()]
 

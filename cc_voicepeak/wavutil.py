@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import os
 import wave
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional, Sequence
 
 from .logging_util import get_logger
 
@@ -45,13 +45,13 @@ def wav_duration(path: Path) -> float:
         return 0.0
 
 
-def _silence(params: "wave._wave_params", seconds: float) -> bytes:
+def _silence(params: wave._wave_params, seconds: float) -> bytes:
     """フレーム境界に揃えた無音."""
     frames = int(params.framerate * seconds)
     return b"\x00" * (frames * params.sampwidth * params.nchannels)
 
 
-def concat_wavs(sources: Sequence[Path], dest: Path, gap_seconds: float = 0.0) -> Optional[Path]:
+def concat_wavs(sources: Sequence[Path], dest: Path, gap_seconds: float = 0.0) -> Path | None:
     """``sources`` を ``dest`` に連結する.
 
     読めない wav やフォーマットの違う wav は読み飛ばし、1 件でも書ければ
@@ -65,7 +65,7 @@ def concat_wavs(sources: Sequence[Path], dest: Path, gap_seconds: float = 0.0) -
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(f"{dest.stem}.{os.getpid()}.tmp")
-    writer: Optional[wave.Wave_write] = None
+    writer: wave.Wave_write | None = None
     params = None
     written = 0
 

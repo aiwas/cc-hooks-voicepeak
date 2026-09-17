@@ -22,7 +22,6 @@ import subprocess
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
 
 from .errors import LockTimeout, RuntimeDirError
 from .fsutil import ensure_private_dir, xdg_state_home
@@ -74,7 +73,7 @@ class ExeLock:
         self.acquired = False
         self._handle = None
 
-    def __enter__(self) -> "ExeLock":
+    def __enter__(self) -> ExeLock:
         self._handle = open(self.path, "a+")
         deadline = time.monotonic() + self.timeout
         while True:
@@ -121,7 +120,7 @@ def pid_alive(pid: int) -> bool:
         return True
 
 
-def process_token(pid: int) -> Optional[str]:
+def process_token(pid: int) -> str | None:
     """``/proc/<pid>/stat`` の starttime. PID 再利用を見分けるために使う."""
     try:
         with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as handle:
@@ -134,7 +133,7 @@ def process_token(pid: int) -> Optional[str]:
     return fields[19] if len(fields) > 19 else None
 
 
-def _is_recorded_process(pid: int, token: Optional[str]) -> bool:
+def _is_recorded_process(pid: int, token: str | None) -> bool:
     """状態ファイルに記録したプロセスが、いまも同じプロセスとして生きているか.
 
     ``token`` が無い状態ファイルは古いものとして扱う (現行の書き手は必ず付ける)。
@@ -176,7 +175,7 @@ class SpeechSlot:
         self.path = runtime_dir() / f"speech-{safe or 'default'}.json"
 
     # -- 状態の読み書き ----------------------------------------------------
-    def read(self) -> Optional[dict]:
+    def read(self) -> dict | None:
         try:
             with self.path.open(encoding="utf-8") as handle:
                 data = json.load(handle)

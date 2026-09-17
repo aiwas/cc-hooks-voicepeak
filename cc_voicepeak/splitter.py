@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
 
 from .logging_util import get_logger
 
@@ -71,7 +71,7 @@ NO_BREAK_AFTER = set("「『（(【〔〈《〘〖［[｛{“‘＄$¥￥#＃@�
 # 半角語 (英単語・数値・パス・識別子) の内部では切らない
 WORDISH = re.compile(r"[0-9A-Za-z_\-.,:/@#+&'~%=?]")
 
-def _by_length(words: Sequence[str]) -> Tuple[str, ...]:
+def _by_length(words: Sequence[str]) -> tuple[str, ...]:
     """長い接尾辞から順に照合するため、長さ降順で固定しておく."""
     return tuple(sorted(words, key=len, reverse=True))
 
@@ -135,7 +135,7 @@ def text_width(text: str, mode: str = "codepoints") -> float:
     return sum(char_width(ch, mode) for ch in text)
 
 
-def _cumulative_widths(text: str, mode: str) -> List[float]:
+def _cumulative_widths(text: str, mode: str) -> list[float]:
     """``widths[i]`` = ``text[:i]`` の幅. 長さは ``len(text) + 1``."""
     if mode == "codepoints":
         return [float(i) for i in range(len(text) + 1)]
@@ -150,7 +150,7 @@ def _cumulative_widths(text: str, mode: str) -> List[float]:
 # ---------------------------------------------------------------------------
 # 候補列挙
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BreakPoint:
     """``text[:pos]`` と ``text[pos:]`` の境界."""
 
@@ -194,7 +194,7 @@ def can_break_at(text: str, pos: int) -> bool:
     return True
 
 
-def _endswith_any(text: str, pos: int, suffixes: Sequence[str]) -> Optional[str]:
+def _endswith_any(text: str, pos: int, suffixes: Sequence[str]) -> str | None:
     """``text[:pos]`` の末尾に一致する接尾辞を返す.
 
     ``suffixes`` は長さ降順に並んでいる前提 (1 文字あたり 2 回呼ばれるので、
@@ -207,7 +207,7 @@ def _endswith_any(text: str, pos: int, suffixes: Sequence[str]) -> Optional[str]
     return None
 
 
-def _sentence_end_pos(text: str, index: int) -> Optional[int]:
+def _sentence_end_pos(text: str, index: int) -> int | None:
     """``index`` の文字が文末記号なら、閉じ括弧まで含めた境界位置を返す."""
     ch = text[index]
     if ch not in SENTENCE_ENDS:
@@ -230,7 +230,7 @@ def _sentence_end_pos(text: str, index: int) -> Optional[int]:
     return pos
 
 
-def find_break_points(text: str) -> List[BreakPoint]:
+def find_break_points(text: str) -> list[BreakPoint]:
     """``text`` 中の分割候補を位置順に返す (同じ位置は最高優先度のみ)."""
     best: dict = {}
 
@@ -331,7 +331,7 @@ def split_text(
     width_mode: str = "codepoints",
     balance_tail: bool = True,
     drop_empty: bool = True,
-) -> List[str]:
+) -> list[str]:
     """``text`` を幅 ``limit`` 以下のブロック列に分割する.
 
     Parameters
@@ -358,7 +358,7 @@ def split_text(
     if not text:
         return []
 
-    blocks: List[str] = []
+    blocks: list[str] = []
     remaining = text
 
     window_size = _window_size(limit, width_mode)
@@ -385,7 +385,7 @@ def split_text(
         floor_width = limit * float(min_fill)
         candidates = [bp for bp in find_break_points(window) if bp.pos <= max_index]
 
-        chosen: Optional[int] = None
+        chosen: int | None = None
         preferred = [bp for bp in candidates if widths[bp.pos] >= floor_width]
         pool = preferred or candidates
         if pool:
@@ -403,7 +403,7 @@ def split_text(
         blocks = _balance_tail(blocks, limit, min_fill, width_mode)
 
     if drop_empty:
-        kept: List[str] = []
+        kept: list[str] = []
         for block in blocks:
             if _speakable(block):
                 kept.append(block)
@@ -419,8 +419,8 @@ def split_text(
 
 
 def _balance_tail(
-    blocks: List[str], limit: int, min_fill: float, width_mode: str
-) -> List[str]:
+    blocks: list[str], limit: int, min_fill: float, width_mode: str
+) -> list[str]:
     """最後のブロックが短すぎる場合、直前のブロックとまとめて再分割する."""
     tail = blocks[-1]
     if text_width(tail, width_mode) >= limit * 0.3:
@@ -460,6 +460,6 @@ def _balance_tail(
     return blocks[:-2] + [left, right]
 
 
-def describe_blocks(blocks: Sequence[str], width_mode: str = "codepoints") -> List[Tuple[int, float, str]]:
+def describe_blocks(blocks: Sequence[str], width_mode: str = "codepoints") -> list[tuple[int, float, str]]:
     """``(番号, 幅, テキスト)`` のリスト. ``--dry-run`` の表示用."""
     return [(i + 1, text_width(block, width_mode), block) for i, block in enumerate(blocks)]

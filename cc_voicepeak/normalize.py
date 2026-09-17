@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 _FENCE = re.compile(r"^\s*(?:```+|~~~+)(.*)$")
 _TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
@@ -61,7 +61,7 @@ _ABSOLUTE_PATH = re.compile(r"^(?:[A-Za-z]:\\|~/|\./|/)")
 # 末尾要素の拡張子 (.py / .tsx など)
 _PATH_EXT = re.compile(r"\.[A-Za-z0-9]{1,8}$")
 
-_EMOJI_RANGES: Sequence[Tuple[int, int]] = (
+_EMOJI_RANGES: Sequence[tuple[int, int]] = (
     (0x1F000, 0x1FAFF),
     (0x2600, 0x27BF),
     (0x2B00, 0x2BFF),
@@ -81,7 +81,7 @@ _ARROW_OTHER_RE = re.compile(f"[{_ARROW_OTHER}]")
 
 # 整形オプションの既定値。設定側 (config.DEFAULTS["normalize"]) はここから派生する
 # ので、キーを足すときはここだけ直す (`enabled` は pipeline が見る設定側だけのキー)。
-DEFAULT_OPTIONS: Dict[str, object] = {
+DEFAULT_OPTIONS: dict[str, object] = {
     # コードブロックの扱い: "drop" / "placeholder" / "read"
     "code_blocks": "placeholder",
     "code_block_placeholder": "コードブロック。",
@@ -121,7 +121,7 @@ def strip_emoji(text: str) -> str:
     return "".join(" " if _is_emoji(ch) else ch for ch in text)
 
 
-def shorten_path(match: "re.Match[str]") -> str:
+def shorten_path(match: re.Match[str]) -> str:
     body = match.group(1)
     line = match.group(2) or ""
     if "://" in body:
@@ -139,15 +139,15 @@ def shorten_path(match: "re.Match[str]") -> str:
     return tail
 
 
-def _remove_code_blocks(lines: List[str], mode: str, placeholder: str) -> List[str]:
+def _remove_code_blocks(lines: list[str], mode: str, placeholder: str) -> list[str]:
     """フェンスで囲まれたコードブロックを ``mode`` に従って処理する.
 
     閉じフェンスが無いまま終わった場合は、コードブロックではなかったとみなして
     本文へ戻す。フェンスを含むコード例や途中で切れた応答で、以降の本文が
     まるごと消えるのを防ぐため。
     """
-    out: List[str] = []
-    buffered: List[str] = []
+    out: list[str] = []
+    buffered: list[str] = []
     fence_at = -1
     in_fence = False
     for line in lines:
@@ -174,8 +174,8 @@ def _remove_code_blocks(lines: List[str], mode: str, placeholder: str) -> List[s
     return out
 
 
-def _handle_tables(lines: List[str], mode: str) -> List[str]:
-    out: List[str] = []
+def _handle_tables(lines: list[str], mode: str) -> list[str]:
+    out: list[str] = []
     for line in lines:
         # 区切り行は読み上げようがないので、先頭パイプの無い ---|--- も落とす
         if _TABLE_SEP.match(line):
@@ -213,19 +213,19 @@ def _line_prefixes(line: str) -> str:
     return line
 
 
-def _choice(opts: Dict[str, object], key: str, allowed: Sequence[str]) -> str:
+def _choice(opts: dict[str, object], key: str, allowed: Sequence[str]) -> str:
     """列挙値を検証する. 未知の値は既定値に倒す (黙って別の動作にしない)."""
     value = str(opts.get(key) or "")
     return value if value in allowed else str(DEFAULT_OPTIONS[key])
 
 
-def _text_option(opts: Dict[str, object], key: str) -> str:
+def _text_option(opts: dict[str, object], key: str) -> str:
     """文字列オプション. null は空文字として扱う."""
     value = opts.get(key)
     return "" if value is None else str(value)
 
 
-def normalize(text: str, options: Optional[Dict[str, object]] = None) -> str:
+def normalize(text: str, options: dict[str, object] | None = None) -> str:
     """読み上げ用に整形した文字列を返す.
 
     ``options`` の値は null も含めてそのまま採用する (null は「空文字」
@@ -247,7 +247,7 @@ def normalize(text: str, options: Optional[Dict[str, object]] = None) -> str:
     )
     lines = _handle_tables(lines, _choice(opts, "tables", ("drop", "read")))
 
-    cleaned: List[str] = []
+    cleaned: list[str] = []
     for line in lines:
         if _HR.match(line):
             continue
@@ -267,9 +267,9 @@ def normalize(text: str, options: Optional[Dict[str, object]] = None) -> str:
     # 強調・打ち消し・インラインコード
     # インラインコードを先に退避する。あとから外すと `get_last_text` の _ や
     # `2*3*4` の * を強調記号として巻き込んでしまう。
-    code_spans: List[str] = []
+    code_spans: list[str] = []
 
-    def stash(match: "re.Match[str]") -> str:
+    def stash(match: re.Match[str]) -> str:
         code_spans.append(match.group(1))
         return f"{_CODE_MARK}{len(code_spans) - 1}{_CODE_MARK}"
 

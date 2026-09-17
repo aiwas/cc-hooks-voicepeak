@@ -545,7 +545,7 @@ class ExeLockTest(CliTestCase):
             for _ in range(2)
         ]
         for index, proc in enumerate(procs):
-            proc.communicate(f"{index}番目の同時起動の確認です。".encode("utf-8"), timeout=120)
+            proc.communicate(f"{index}番目の同時起動の確認です。".encode(), timeout=120)
 
         calls = self.recorded_calls()
         self.assertGreaterEqual(len(calls), 2)

@@ -21,7 +21,6 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import List, Optional
 
 from .bridge import Bridge
 from .errors import PlayerError
@@ -83,14 +82,14 @@ class Player:
     def enqueue(self, path: Path) -> None:
         raise NotImplementedError
 
-    def finish(self, timeout: Optional[float] = None) -> None:
+    def finish(self, timeout: float | None = None) -> None:
         pass
 
     def stop(self) -> None:
         pass
 
     @property
-    def win_pid(self) -> Optional[int]:
+    def win_pid(self) -> int | None:
         return None
 
 
@@ -100,7 +99,7 @@ class NullPlayer(Player):
     name = "none"
 
     def __init__(self) -> None:
-        self.played: List[Path] = []
+        self.played: list[Path] = []
 
     def enqueue(self, path: Path) -> None:
         self.played.append(Path(path))
@@ -115,10 +114,10 @@ class PowershellPlayer(Player):
     def __init__(self, bridge: Bridge, executable: str = "powershell.exe"):
         self.bridge = bridge
         self.executable = executable
-        self.proc: Optional[subprocess.Popen] = None
-        self._win_pid: Optional[int] = None
+        self.proc: subprocess.Popen | None = None
+        self._win_pid: int | None = None
         self._pid_event = threading.Event()
-        self._reader: Optional[threading.Thread] = None
+        self._reader: threading.Thread | None = None
         self._queued = 0
         self._total_seconds = 0.0
 
@@ -196,7 +195,7 @@ class PowershellPlayer(Player):
                 log.debug("player: %s", line)
 
     @property
-    def win_pid(self) -> Optional[int]:
+    def win_pid(self) -> int | None:
         return self._win_pid
 
     def enqueue(self, path: Path) -> None:
@@ -214,7 +213,7 @@ class PowershellPlayer(Player):
         self._queued += 1
         self._total_seconds += wav_duration(Path(path))
 
-    def finish(self, timeout: Optional[float] = None) -> None:
+    def finish(self, timeout: float | None = None) -> None:
         proc = self.proc
         if proc is None:
             return
@@ -276,16 +275,16 @@ class PowershellPlayer(Player):
 class CommandPlayer(Player):
     """WSL 側のコマンド (paplay / aplay / ffplay) で順次再生する."""
 
-    def __init__(self, backend: str, volume: Optional[int] = None):
+    def __init__(self, backend: str, volume: int | None = None):
         self.name = backend
         self.volume = volume
-        self._queue: "queue.Queue[Optional[Path]]" = queue.Queue()
-        self._thread: Optional[threading.Thread] = None
-        self._current: Optional[subprocess.Popen] = None
+        self._queue: queue.Queue[Path | None] = queue.Queue()
+        self._thread: threading.Thread | None = None
+        self._current: subprocess.Popen | None = None
         self._stopped = threading.Event()
         self._total_seconds = 0.0
 
-    def _command(self, path: Path) -> List[str]:
+    def _command(self, path: Path) -> list[str]:
         if self.name == "paplay":
             command = ["paplay"]
             if self.volume is not None:
@@ -346,7 +345,7 @@ class CommandPlayer(Player):
         self._queue.put(Path(path))
         self._total_seconds += wav_duration(Path(path))
 
-    def finish(self, timeout: Optional[float] = None) -> None:
+    def finish(self, timeout: float | None = None) -> None:
         self._queue.put(None)
         thread = self._thread
         if thread is None:
@@ -365,7 +364,7 @@ class CommandPlayer(Player):
         self._queue.put(None)
 
 
-def find_powershell() -> Optional[str]:
+def find_powershell() -> str | None:
     """PowerShell の実行ファイルを探す.
 
     ``/etc/wsl.conf`` で ``appendWindowsPath=false`` にしていると PATH から
@@ -381,7 +380,7 @@ def find_powershell() -> Optional[str]:
     return None
 
 
-def select_player(backend: str, bridge: Bridge, volume: Optional[int] = None) -> Player:
+def select_player(backend: str, bridge: Bridge, volume: int | None = None) -> Player:
     """設定値と環境から再生バックエンドを決める."""
     if backend == "none":
         return NullPlayer()

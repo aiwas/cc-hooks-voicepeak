@@ -11,7 +11,6 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
 
 from .bridge import Bridge, detect_bridge, interop_enabled, is_wsl, resolve_exe
 from .config import Config, unknown_keys
@@ -23,7 +22,7 @@ WARN = "WARN"
 FAIL = "FAIL"
 
 
-@dataclass
+@dataclass(slots=True)
 class CheckItem:
     name: str
     status: str
@@ -53,7 +52,7 @@ def _command_player_check(backend: str) -> CheckItem:
     )
 
 
-def _player_check(backend: str, bridge: Bridge, volume: Optional[int] = None) -> CheckItem:
+def _player_check(backend: str, bridge: Bridge, volume: int | None = None) -> CheckItem:
     """``player.backend`` の設定に対して、実際に使える再生手段があるかを見る."""
     if backend == "none":
         return CheckItem("再生 (none)", OK, "再生せず合成だけ行います")
@@ -93,9 +92,9 @@ def _player_check(backend: str, bridge: Bridge, volume: Optional[int] = None) ->
     )
 
 
-def run_checks(cfg: Config, do_synth: bool = False) -> List[CheckItem]:
-    items: List[CheckItem] = []
-    bridge: Optional[Bridge] = None
+def run_checks(cfg: Config, do_synth: bool = False) -> list[CheckItem]:
+    items: list[CheckItem] = []
+    bridge: Bridge | None = None
 
     # 1. 実行環境
     if is_wsl():
@@ -135,7 +134,7 @@ def run_checks(cfg: Config, do_synth: bool = False) -> List[CheckItem]:
         items.append(CheckItem("ブリッジ", FAIL, str(exc)))
         return items
 
-    temp_root: Optional[Path] = None
+    temp_root: Path | None = None
     try:
         # Linux 側へ落ちる場合は temp_root() 自身が所有者と権限を検査する
         temp_root = bridge.temp_root()
@@ -171,7 +170,7 @@ def run_checks(cfg: Config, do_synth: bool = False) -> List[CheckItem]:
             items.append(CheckItem("パス変換", FAIL, str(exc)))
 
     # 3. voicepeak
-    exe: Optional[Path] = None
+    exe: Path | None = None
     try:
         exe = resolve_exe(bridge, cfg.get("voicepeak.exe"))
         items.append(CheckItem("voicepeak", OK, str(exe)))

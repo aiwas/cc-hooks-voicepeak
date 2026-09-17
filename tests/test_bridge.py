@@ -12,9 +12,8 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
-
 from types import SimpleNamespace
+from unittest import mock
 
 from cc_voicepeak import bridge as bridge_module
 from cc_voicepeak.bridge import (

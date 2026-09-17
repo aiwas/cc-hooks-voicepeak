@@ -13,10 +13,15 @@ python3 -m unittest discover -s tests -t .   # テスト全件 (379 件)
 # 下限バージョンでの確認とパッケージング (uv)
 uv run --no-project --python 3.13 python -m unittest discover -s tests -t .
 uv build                                     # sdist + wheel を dist/ へ
+uvx ruff check .                             # 型注釈の記法・未使用 import・import 順
 ```
 
 `requires-python` の下限は 3.13。手元の既定がそれより新しい場合は、文法と
 標準ライブラリだけで判断せず `uv run --python 3.13` で実際に通しておく。
+型注釈は `list[str]` / `str | None` / `collections.abc.Sequence` の記法で書く
+（`typing.List` / `Optional` は使わない。`pyproject.toml` の `[tool.ruff]` で
+`UP` ルールを選んであり、`uvx ruff check .` が検出する）。
+dataclass は `slots=True` を付ける（`BreakPoint` は分割の走査で大量に作られる）。
 `uv build` は `[build-system]` を見て setuptools を隔離環境へ取得するため、
 環境に setuptools や pip を入れておく必要はない。
 

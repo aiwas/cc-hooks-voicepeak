@@ -20,8 +20,9 @@ from __future__ import annotations
 import copy
 import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 from .errors import ConfigError
 from .normalize import DEFAULT_OPTIONS as _NORMALIZE_DEFAULTS
@@ -30,7 +31,7 @@ from .normalize import DEFAULT_OPTIONS as _NORMALIZE_DEFAULTS
 # 141 文字以上を渡すとエラーになり wav が出力されないため、既定は安全側の 140。
 VOICEPEAK_CHAR_LIMIT = 140
 
-DEFAULTS: Dict[str, Any] = {
+DEFAULTS: dict[str, Any] = {
     # ---- voicepeak 本体 -------------------------------------------------
     "voicepeak": {
         # WSL パス (/mnt/c/...) でも Windows パス (C:\...) でも可。null なら自動探索。
@@ -132,9 +133,9 @@ _INT_KEYS = {
 class Config:
     """ネストした dict を ``cfg.get("voicepeak.narrator")`` で引ける薄いラッパ."""
 
-    def __init__(self, data: Dict[str, Any], sources: Optional[List[Path]] = None):
+    def __init__(self, data: dict[str, Any], sources: list[Path] | None = None):
         self._data = data
-        self.sources: List[Path] = sources or []
+        self.sources: list[Path] = sources or []
 
     # -- アクセサ ---------------------------------------------------------
     def get(self, dotted: str, default: Any = None) -> Any:
@@ -152,18 +153,18 @@ class Config:
             node = node.setdefault(part, {})
         node[parts[-1]] = value
 
-    def section(self, name: str) -> Dict[str, Any]:
+    def section(self, name: str) -> dict[str, Any]:
         value = self.get(name, {})
         return value if isinstance(value, dict) else {}
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return copy.deepcopy(self._data)
 
     def __repr__(self) -> str:  # pragma: no cover - デバッグ用
         return f"Config(sources={[str(p) for p in self.sources]})"
 
 
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(base.get(key), dict):
             _deep_merge(base[key], value)
@@ -181,7 +182,7 @@ def _coerce(path: tuple, value: Any) -> Any:
     return value
 
 
-def _coerce_known_keys(data: Dict[str, Any]) -> None:
+def _coerce_known_keys(data: dict[str, Any]) -> None:
     """設定ファイル由来の値にも型変換をかける.
 
     環境変数と CLI 引数は ``_coerce()`` を通っていたが、JSON 由来の値は
@@ -196,9 +197,9 @@ def _coerce_known_keys(data: Dict[str, Any]) -> None:
             node[path[-1]] = _coerce(path, node[path[-1]])
 
 
-def config_search_paths() -> List[Path]:
+def config_search_paths() -> list[Path]:
     """探索対象の設定ファイルを優先度の低い順に返す."""
-    paths: List[Path] = []
+    paths: list[Path] = []
 
     xdg = os.environ.get("XDG_CONFIG_HOME")
     config_home = Path(xdg) if xdg else Path.home() / ".config"
@@ -217,7 +218,7 @@ def config_search_paths() -> List[Path]:
     return paths
 
 
-def unknown_keys(cfg: Config) -> List[str]:
+def unknown_keys(cfg: Config) -> list[str]:
     """``DEFAULTS`` に無いキーを ``"voicepeak.narator"`` の形で列挙する.
 
     綴り誤りは黙って無視されてしまうので、``check`` で警告するために使う。
@@ -225,8 +226,8 @@ def unknown_keys(cfg: Config) -> List[str]:
     return sorted(_walk_unknown(cfg.as_dict(), DEFAULTS, ""))
 
 
-def _walk_unknown(data: Dict[str, Any], defaults: Dict[str, Any], prefix: str) -> List[str]:
-    found: List[str] = []
+def _walk_unknown(data: dict[str, Any], defaults: dict[str, Any], prefix: str) -> list[str]:
+    found: list[str] = []
     for key, value in data.items():
         dotted = f"{prefix}{key}"
         if key not in defaults:
@@ -237,7 +238,7 @@ def _walk_unknown(data: Dict[str, Any], defaults: Dict[str, Any], prefix: str) -
     return found
 
 
-def _merge_files(data: Dict[str, Any], paths: List[Path], used: List[Path]) -> None:
+def _merge_files(data: dict[str, Any], paths: list[Path], used: list[Path]) -> None:
     """設定ファイルを順に読み込んで ``data`` へ重ねる."""
     for path in paths:
         try:
@@ -256,13 +257,13 @@ def _merge_files(data: Dict[str, Any], paths: List[Path], used: List[Path]) -> N
 
 
 def load_config(
-    extra_paths: Optional[List[Path]] = None,
-    overrides: Optional[Dict[str, Any]] = None,
+    extra_paths: list[Path] | None = None,
+    overrides: dict[str, Any] | None = None,
     use_env: bool = True,
 ) -> Config:
     """設定を読み込んで :class:`Config` を返す."""
     data = copy.deepcopy(DEFAULTS)
-    used: List[Path] = []
+    used: list[Path] = []
 
     _merge_files(data, config_search_paths(), used)
 
@@ -292,7 +293,7 @@ def load_config(
     return cfg
 
 
-def _check_int(cfg: Config, key: str, low: int, high: Optional[int] = None) -> None:
+def _check_int(cfg: Config, key: str, low: int, high: int | None = None) -> None:
     """``None`` を許す整数キーの範囲検査 (bool は整数として扱わない)."""
     value = cfg.get(key)
     if value is None:

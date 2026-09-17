@@ -7,7 +7,6 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional
 
 from .fsutil import xdg_state_home
 
@@ -40,7 +39,7 @@ class MultiProcessRotatingFileHandler(RotatingFileHandler):
         filename,
         maxBytes: int = 0,
         backupCount: int = 0,
-        encoding: Optional[str] = None,
+        encoding: str | None = None,
     ):
         # ロックを取ってから開きたいので遅延オープンにする
         super().__init__(
@@ -106,7 +105,7 @@ def default_log_path() -> Path:
 
 def setup_logging(
     level: str = "info",
-    file: Optional[str] = None,
+    file: str | None = None,
     max_bytes: int = 1048576,
     stderr: bool = False,
 ) -> logging.Logger:
